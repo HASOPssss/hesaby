@@ -605,6 +605,16 @@ const ProgressBar = ({ value, max, color }) => (
 // ─── ADMIN_EMAIL: غيّر الإيميل ده لإيميلك أنت ────────────────────────────────
 const ADMIN_EMAIL = "gabr80252@gmail.com";
 
+// ─── LOGO COMPONENT ───────────────────────────────────────────────────────────
+const Logo = ({ size=32 }) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#6c7fff"/>
+    <path d="M8 22V14l8-6 8 6v8" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    <rect x="13" y="16" width="6" height="6" rx="1" stroke="#fff" strokeWidth="1.8"/>
+    <path d="M11 11h10M16 8v3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/>
+  </svg>
+);
+
 // ─── SUBSCRIPTION EXPIRED ─────────────────────────────────────────────────────
 function SubscriptionExpired() {
   return (
@@ -655,9 +665,7 @@ function LoginScreen() {
     <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl" }}>
       <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:20,padding:"40px 44px",width:"min(420px,90vw)",display:"flex",flexDirection:"column",gap:20 }}>
         <div style={{ textAlign:"center",marginBottom:4 }}>
-          <div style={{ width:52,height:52,borderRadius:14,background:C.accentDim,border:`1px solid ${C.accent}33`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px" }}>
-            <Ic d={I.revenue} s={24} c={C.accent} />
-          </div>
+          <div style={{ display:"flex",justifyContent:"center",marginBottom:16 }}><Logo size={52} /></div>
           <div style={{ fontSize:26,fontWeight:800,color:C.text }}>حسابي Pro</div>
           <div style={{ fontSize:12,color:C.textMuted,marginTop:4 }}>نظام محاسبة متكامل للشركات والمصانع</div>
         </div>
@@ -1733,13 +1741,15 @@ export default function App() {
   }, []);
 
   // ─── بيانات التطبيق ─────────────────────────────────────────────────────
+  useEffect(()=>{ document.title = 'حسابي Pro'; }, []);
+
   const { data, loading, actions } = useAppData(userId);
 
   // ─── شاشة التحميل ───────────────────────────────────────────────────────
   if (authLoading) {
     return (
-      <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",color:C.text,fontFamily:"'Cairo','Segoe UI',sans-serif",fontSize:16 }}>
-        جاري التحميل...
+      <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",color:C.text,fontFamily:"'Cairo','Segoe UI',sans-serif",flexDirection:"column",gap:16 }}>
+        <Logo size={48} /><div style={{ fontSize:14,color:C.textMuted }}>جاري التحميل...</div>
       </div>
     );
   }
@@ -1787,9 +1797,12 @@ export default function App() {
     <div style={{ minHeight:"100vh",background:C.bg,fontFamily:"'Cairo','Segoe UI',sans-serif",display:"flex",direction:"rtl" }}>
       {/* Sidebar */}
       <div style={{ width:200,background:C.surface,borderLeft:`1px solid ${C.border}`,display:"flex",flexDirection:"column",position:"fixed",top:0,right:0,height:"100vh",zIndex:100 }}>
-        <div style={{ padding:"20px 16px",borderBottom:`1px solid ${C.border}` }}>
-          <div style={{ fontSize:18,fontWeight:800,color:C.accent }}>حسابي Pro</div>
-          <div style={{ fontSize:10,color:C.textMuted,marginTop:2 }}>نظام محاسبة متكامل</div>
+        <div style={{ padding:"16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10 }}>
+          <Logo size={32} />
+          <div>
+            <div style={{ fontSize:15,fontWeight:800,color:C.text }}>حسابي Pro</div>
+            <div style={{ fontSize:10,color:C.textMuted }}>نظام محاسبة متكامل</div>
+          </div>
         </div>
         <nav style={{ flex:1,overflowY:"auto",padding:"10px 8px" }}>
           {navItems.map(item=>(
