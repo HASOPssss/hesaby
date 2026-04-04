@@ -693,19 +693,15 @@ const Logo = ({ size=32 }) => (
 function SubscriptionExpired() {
   return (
     <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl" }}>
-      <div style={{ background:C.surface,border:`2px solid ${C.red}33`,borderRadius:24,padding:"48px 52px",width:"min(440px,90vw)",display:"flex",flexDirection:"column",alignItems:"center",gap:22,textAlign:"center" }}>
-        <div style={{ width:72,height:72,borderRadius:"50%",background:C.redDim,border:`2px solid ${C.red}44`,display:"flex",alignItems:"center",justifyContent:"center" }}>
-          <Ic d={I.alert} s={32} c={C.red} />
+      <div style={{ background:C.surface,border:`2px solid ${C.red}33`,borderRadius:24,padding:"48px 52px",width:"min(440px,90vw)",display:"flex",flexDirection:"column",alignItems:"center",gap:22,textAlign:"center",boxShadow:`0 0 60px ${C.red}11` }}>
+        <div style={{ width:80,height:80,borderRadius:"50%",background:C.redDim,border:`2px solid ${C.red}44`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 30px ${C.red}22` }}>
+          <Ic d={I.alert} s={36} c={C.red} />
         </div>
         <div>
-          <div style={{ fontSize:22,fontWeight:800,color:C.text,marginBottom:10 }}>انتهت مدة الاشتراك</div>
-          <div style={{ fontSize:13,color:C.textMuted,lineHeight:1.9 }}>عذراً، انتهت صلاحية حسابك<br/>يرجى التواصل مع الإدارة لتجديد الاشتراك</div>
+          <div style={{ fontSize:24,fontWeight:800,color:C.text,marginBottom:12,letterSpacing:-0.5 }}>انتهت مدة الاشتراك</div>
+          <div style={{ fontSize:13,color:C.textMuted,lineHeight:2 }}>عذراً، انتهت صلاحية حسابك<br/>يرجى التواصل مع الإدارة لتجديد الاشتراك</div>
         </div>
-        <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 24px",width:"100%" }}>
-          <div style={{ fontSize:11,color:C.textMuted,marginBottom:6,fontWeight:600 }}>للتواصل والتجديد</div>
-          <div style={{ fontSize:14,color:C.accent,fontWeight:700 }}>{ADMIN_EMAIL}</div>
-        </div>
-        <button onClick={()=>supabase.auth.signOut()} style={{ background:"none",border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 22px",fontSize:12,color:C.textMuted,cursor:"pointer",fontFamily:"inherit" }}>تسجيل الخروج</button>
+        <button onClick={()=>supabase.auth.signOut()} style={{ background:C.redDim,border:`1px solid ${C.red}44`,borderRadius:10,padding:"10px 28px",fontSize:13,fontWeight:700,color:C.red,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>تسجيل الخروج</button>
       </div>
     </div>
   );
@@ -903,6 +899,49 @@ const ROLE_PRESETS = {
   "صلاحيات كاملة": { canAdd:true,  canDelete:true,  canEdit:true },
 };
 
+
+// ─── PERMISSION TOAST ─────────────────────────────────────────────────────────
+let _showPermToast = null;
+function setPermToastFn(fn) { _showPermToast = fn; }
+function showPermissionToast(msg, type="warning") { if (_showPermToast) _showPermToast(msg, type); }
+
+function PermissionToastProvider() {
+  const [toasts, setToasts] = useState([]);
+  useEffect(() => {
+    setPermToastFn((msg, type) => {
+      const id = Date.now();
+      setToasts(prev => [...prev, { id, msg, type }]);
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+    });
+  }, []);
+  if (!toasts.length) return null;
+  return (
+    <div style={{ position:"fixed",top:24,left:"50%",transform:"translateX(-50%)",zIndex:9999,display:"flex",flexDirection:"column",gap:10,alignItems:"center",pointerEvents:"none" }}>
+      {toasts.map(t => {
+        const color = t.type==="error" ? C.red : t.type==="success" ? C.green : C.yellow;
+        const bg = t.type==="error" ? C.redDim : t.type==="success" ? C.greenDim : C.yellowDim;
+        const icon = t.type==="error" ? I.alert : t.type==="success" ? I.stocktake : I.shield;
+        return (
+          <div key={t.id} style={{
+            background:C.surface, border:`1px solid ${color}44`, borderRadius:14,
+            padding:"14px 22px", display:"flex", alignItems:"center", gap:12,
+            boxShadow:`0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px ${color}22`,
+            animation:"slideDown 0.3s ease", minWidth:280, maxWidth:400,
+            pointerEvents:"all",
+          }}>
+            <div style={{ background:bg, padding:8, borderRadius:10, flexShrink:0 }}>
+              <Ic d={icon} s={16} c={color} />
+            </div>
+            <span style={{ fontSize:13, fontWeight:700, color:C.text, flex:1 }}>{t.msg}</span>
+            <div style={{ width:3, height:32, background:color, borderRadius:3, flexShrink:0 }} />
+          </div>
+        );
+      })}
+      <style>{`@keyframes slideDown{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}`}</style>
+    </div>
+  );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 function AdminPanel() {
   const [activeTab, setActiveTab] = useState("clients"); // clients | subusers
@@ -922,6 +961,8 @@ function AdminPanel() {
   const [subForm, setSubForm] = useState({ username:"", password:"", display_name:"", role:"مشاهدة فقط", allowed_pages: ALL_PAGES.map(p=>p.id) });
   const [addingSub, setAddingSub] = useState(false);
   const [togglingSubId, setTogglingSubId] = useState(null);
+  const [editingSub, setEditingSub] = useState(null); // sub-user being edited
+  const [editForm, setEditForm] = useState(null);
 
   const showMsg = (text, type="success") => { setMsg({ text, type }); setTimeout(()=>setMsg({text:"",type:""}),4000); };
 
@@ -945,14 +986,17 @@ function AdminPanel() {
 
   useEffect(() => { loadUsers(); loadSubUsers(); }, []);
 
-  // ── Toggle client subscription ──
+  // ── Toggle client subscription (also toggles all sub_users under that company) ──
   const toggleUser = async (user) => {
     setToggling(user.id);
     const newStatus = !user.is_active;
     const { error } = await supabase.from("profiles").update({ is_active: newStatus }).eq("id", user.id);
     if (!error) {
+      // Also update all sub_users belonging to this company
+      await supabase.from("sub_users").update({ is_active: newStatus }).eq("owner_id", user.id);
       setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: newStatus } : u));
-      showMsg(newStatus ? `✓ تم تفعيل ${user.email}` : `✓ تم تعطيل ${user.email}`, newStatus ? "success" : "warning");
+      setSubUsers(prev => prev.map(su => su.owner_id === user.id ? { ...su, is_active: newStatus } : su));
+      showMsg(newStatus ? `✓ تم تفعيل ${user.email} وجميع موظفيها` : `✓ تم تعطيل ${user.email} وجميع موظفيها`, newStatus ? "success" : "warning");
     } else { showMsg("حدث خطأ، حاول مرة أخرى", "error"); }
     setToggling(null);
   };
@@ -1050,6 +1094,40 @@ function AdminPanel() {
     const { error } = await supabase.from("sub_users").delete().eq("id", id);
     if (!error) { setSubUsers(prev => prev.filter(s => s.id !== id)); showMsg("✓ تم الحذف"); }
     else showMsg("خطأ في الحذف", "error");
+  };
+
+  const openEditSub = (su) => {
+    setEditingSub(su);
+    setEditForm({
+      username: su.username,
+      password_plain: su.password_plain || "",
+      display_name: su.display_name || "",
+      role: su.role || "مشاهدة فقط",
+      allowed_pages: su.allowed_pages || ALL_PAGES.map(p=>p.id),
+      owner_id: su.owner_id,
+    });
+  };
+
+  const saveEditSub = async () => {
+    if (!editForm.username.trim()) { showMsg("أدخل اسم المستخدم", "error"); return; }
+    const perms = ROLE_PRESETS[editForm.role] || ROLE_PRESETS["مشاهدة فقط"];
+    const updates = {
+      username: editForm.username.trim().toLowerCase(),
+      display_name: editForm.display_name || editForm.username,
+      role: editForm.role,
+      allowed_pages: editForm.allowed_pages,
+      can_add: perms.canAdd,
+      can_delete: perms.canDelete,
+      can_edit: perms.canEdit,
+      owner_id: editForm.owner_id,
+    };
+    if (editForm.password_plain) updates.password_plain = editForm.password_plain;
+    const { error } = await supabase.from("sub_users").update(updates).eq("id", editingSub.id);
+    if (!error) {
+      setSubUsers(prev => prev.map(s => s.id === editingSub.id ? { ...s, ...updates } : s));
+      showMsg(`✓ تم تحديث بيانات "${editForm.username}" بنجاح`);
+      setEditingSub(null); setEditForm(null);
+    } else showMsg("خطأ في الحفظ: " + error.message, "error");
   };
 
   const clientUsers = users.filter(u => u.email !== ADMIN_EMAIL);
@@ -1182,7 +1260,10 @@ function AdminPanel() {
                               style={{ background:su.is_active?C.yellowDim:C.greenDim,color:su.is_active?C.yellow:C.green,border:`1px solid ${su.is_active?C.yellow:C.green}33`,borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
                               {togglingSubId===su.id?"...":(su.is_active?"تعطيل":"تفعيل")}
                             </button>
-                            <button onClick={()=>deleteSubUser(su.id)} style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer" }}>
+                            <button onClick={()=>openEditSub(su)} style={{ background:C.blueDim,color:C.blue,border:`1px solid ${C.blue}33`,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer" }} title="تعديل">
+                              <Ic d={I.edit} s={13} />
+                            </button>
+                            <button onClick={()=>deleteSubUser(su.id)} style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer" }} title="حذف">
                               <Ic d={I.trash} s={13} />
                             </button>
                           </div>
@@ -1304,6 +1385,60 @@ function AdminPanel() {
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
               <Btn variant="ghost" onClick={()=>setShowSubAdd(false)}>إلغاء</Btn>
               <Btn onClick={addSubUser}>{addingSub?"جاري الإضافة...":"إضافة الموظف"}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Sub-User Modal ── */}
+      {editingSub && editForm && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16 }}>
+          <div style={{ background:C.surface,border:`1px solid ${C.blue}33`,borderRadius:22,padding:32,width:"min(640px,95vw)",maxHeight:"90vh",overflowY:"auto",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,display:"flex",flexDirection:"column",gap:18,boxShadow:`0 0 60px ${C.blue}22` }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>✏️ تعديل بيانات الموظف</h2>
+              <button onClick={()=>{setEditingSub(null);setEditForm(null);}} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
+            </div>
+
+            <div style={{ background:C.blueDim,border:`1px solid ${C.blue}22`,borderRadius:12,padding:"12px 16px",fontSize:12,color:C.blue }}>
+              🔵 تعديل بيانات: <strong>{editingSub.username}</strong>
+            </div>
+
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:14 }}>
+              <Inp label="اسم المستخدم (يوزرنيم) *" value={editForm.username} onChange={v=>setEditForm({...editForm,username:v})} placeholder="ahmed123" />
+              <Inp label="كلمة مرور جديدة (اتركه فارغ للإبقاء)" value={editForm.password_plain} onChange={v=>setEditForm({...editForm,password_plain:v})} placeholder="••••••••" />
+              <Inp label="الاسم المعروض" value={editForm.display_name} onChange={v=>setEditForm({...editForm,display_name:v})} placeholder="أحمد محمد" />
+              <Sel label="الدور الوظيفي" value={editForm.role} onChange={v=>setEditForm({...editForm,role:v})} options={Object.keys(ROLE_PRESETS).map(r=>({value:r,label:r}))} />
+              <Sel label="الشركة المرتبطة" value={editForm.owner_id} onChange={v=>setEditForm({...editForm,owner_id:v})}
+                options={users.filter(u=>u.email!==ADMIN_EMAIL).map(u=>({value:u.id,label:u.company_name||u.email}))} />
+            </div>
+
+            <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:14,padding:16 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+                <span style={{ fontSize:13,fontWeight:700,color:C.text }}>الصفحات المسموح بها</span>
+                <div style={{ display:"flex",gap:8 }}>
+                  <button onClick={()=>setEditForm(p=>({...p,allowed_pages:ALL_PAGES.map(pg=>pg.id)}))} style={{ background:C.accentDim,color:C.accent,border:`1px solid ${C.accent}33`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>تحديد الكل</button>
+                  <button onClick={()=>setEditForm(p=>({...p,allowed_pages:[]}))} style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>إلغاء الكل</button>
+                </div>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8 }}>
+                {ALL_PAGES.map(pg=>{
+                  const checked = editForm.allowed_pages.includes(pg.id);
+                  return (
+                    <label key={pg.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:10,background:checked?C.accentDim:C.surface3,border:`1px solid ${checked?C.accent+"44":C.border}`,cursor:"pointer",transition:"all 0.15s" }}>
+                      <input type="checkbox" checked={checked} onChange={e=>setEditForm(prev=>({
+                        ...prev,
+                        allowed_pages: e.target.checked ? [...prev.allowed_pages,pg.id] : prev.allowed_pages.filter(x=>x!==pg.id)
+                      }))} style={{ accentColor:C.accent,width:14,height:14 }} />
+                      <span style={{ fontSize:12,fontWeight:600,color:checked?C.accent:C.textMuted }}>{pg.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>{setEditingSub(null);setEditForm(null);}}>إلغاء</Btn>
+              <Btn variant="cyan" onClick={saveEditSub}><Ic d={I.edit} s={14} />حفظ التعديلات</Btn>
             </div>
           </div>
         </div>
@@ -3439,19 +3574,19 @@ export default function App() {
     // Restrict actions based on permissions
     const restrictedActions = {
       ...actions,
-      addSale: perms.canAdd ? actions.addSale : ()=>alert("ليس لديك صلاحية الإضافة"),
-      deleteSale: perms.canDelete ? actions.deleteSale : ()=>alert("ليس لديك صلاحية الحذف"),
-      addPurchase: perms.canAdd ? actions.addPurchase : ()=>alert("ليس لديك صلاحية الإضافة"),
-      deletePurchase: perms.canDelete ? actions.deletePurchase : ()=>alert("ليس لديك صلاحية الحذف"),
-      addReturn: perms.canAdd ? actions.addReturn : ()=>alert("ليس لديك صلاحية الإضافة"),
-      deleteReturn: perms.canDelete ? actions.deleteReturn : ()=>alert("ليس لديك صلاحية الحذف"),
-      addClient: perms.canAdd ? actions.addClient : ()=>alert("ليس لديك صلاحية الإضافة"),
-      deleteClient: perms.canDelete ? actions.deleteClient : ()=>alert("ليس لديك صلاحية الحذف"),
-      addSupplier: perms.canAdd ? actions.addSupplier : ()=>alert("ليس لديك صلاحية الإضافة"),
-      deleteSupplier: perms.canDelete ? actions.deleteSupplier : ()=>alert("ليس لديك صلاحية الحذف"),
-      addInventoryItem: perms.canAdd ? actions.addInventoryItem : ()=>alert("ليس لديك صلاحية الإضافة"),
-      updateInventoryItem: perms.canEdit ? actions.updateInventoryItem : ()=>alert("ليس لديك صلاحية التعديل"),
-      deleteInventoryItem: perms.canDelete ? actions.deleteInventoryItem : ()=>alert("ليس لديك صلاحية الحذف"),
+      addSale: perms.canAdd ? actions.addSale : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteSale: perms.canDelete ? actions.deleteSale : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addPurchase: perms.canAdd ? actions.addPurchase : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deletePurchase: perms.canDelete ? actions.deletePurchase : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addReturn: perms.canAdd ? actions.addReturn : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteReturn: perms.canDelete ? actions.deleteReturn : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addClient: perms.canAdd ? actions.addClient : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteClient: perms.canDelete ? actions.deleteClient : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addSupplier: perms.canAdd ? actions.addSupplier : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteSupplier: perms.canDelete ? actions.deleteSupplier : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addInventoryItem: perms.canAdd ? actions.addInventoryItem : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      updateInventoryItem: perms.canEdit ? actions.updateInventoryItem : ()=>showPermissionToast("ليس لديك صلاحية التعديل"),
+      deleteInventoryItem: perms.canDelete ? actions.deleteInventoryItem : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
     };
 
     return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={restrictedActions} loading={loading}
@@ -3531,6 +3666,7 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
 
   return (
     <div style={{ minHeight:"100vh",background:C.bg,fontFamily:"'Cairo','Segoe UI',sans-serif",display:"flex",direction:"rtl" }}>
+      <PermissionToastProvider />
       {/* ── Sidebar ── */}
       <div style={{
         width:W, background:C.surface, borderLeft:`1px solid ${C.border}`,
