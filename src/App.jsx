@@ -712,10 +712,8 @@ function SubscriptionExpired() {
 }
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
-// Sub-user login: stored in Supabase table "sub_users" with owner_id, username, password_hash, role, allowed_pages
-// We do client-side lookup since we can't use admin SDK on frontend
 function LoginScreen({ onSubUserLogin }) {
-  const [mode, setMode] = useState("company"); // "company" | "employee"
+  const [mode, setMode] = useState("company");
   const [form, setForm] = useState({ email:"", password:"" });
   const [empForm, setEmpForm] = useState({ username:"", password:"" });
   const [err, setErr] = useState("");
@@ -739,98 +737,139 @@ function LoginScreen({ onSubUserLogin }) {
     if (!empForm.username || !empForm.password) { setErr("أدخل اسم المستخدم وكلمة المرور"); return; }
     setErr(""); setLoading(true);
     try {
-      // Look up sub_user by username (case-insensitive)
       const { data: subUsers, error } = await supabase
-        .from("sub_users")
-        .select("*")
-        .ilike("username", empForm.username.trim());
+        .from("sub_users").select("*").ilike("username", empForm.username.trim());
       if (error) { setErr("حدث خطأ في الاتصال"); setLoading(false); return; }
       if (!subUsers || subUsers.length === 0) { setErr("اسم المستخدم غير موجود"); setLoading(false); return; }
       const su = subUsers[0];
       if (su.password_plain !== empForm.password) { setErr("كلمة المرور غير صحيحة"); setLoading(false); return; }
       if (!su.is_active) { setErr("هذا الحساب معطّل، تواصل مع المسؤول"); setLoading(false); return; }
-      // Now sign in as the owner to get data access
       onSubUserLogin(su);
     } catch(e){ setErr(e.message); }
     setLoading(false);
   };
 
-  const inputStyle = { background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"11px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box",transition:"border-color 0.2s" };
+  const inp = {
+    background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
+    padding: "11px 14px", color: C.text, fontSize: 13, fontFamily: "inherit",
+    outline: "none", width: "100%", boxSizing: "border-box", transition: "border-color 0.2s",
+  };
 
   return (
-    <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl",position:"relative",overflow:"hidden" }}>
-      {/* Ambient glows */}
-      <div style={{ position:"absolute",top:-120,right:-80,width:500,height:500,borderRadius:"50%",background:`radial-gradient(circle, ${C.accentGlow} 0%, transparent 65%)`,pointerEvents:"none" }} />
-      <div style={{ position:"absolute",bottom:-80,left:-80,width:350,height:350,borderRadius:"50%",background:`radial-gradient(circle, rgba(52,211,153,0.12) 0%, transparent 70%)`,pointerEvents:"none" }} />
-      <div style={{ position:"absolute",top:"40%",left:"20%",width:200,height:200,borderRadius:"50%",background:`radial-gradient(circle, rgba(167,139,250,0.08) 0%, transparent 70%)`,pointerEvents:"none" }} />
+    <div style={{ minHeight:"100vh", background:C.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", fontFamily:"'Cairo','Segoe UI',sans-serif", direction:"rtl", position:"relative", overflow:"hidden" }}>
 
-      <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:28,padding:"44px 48px",width:"min(440px,92vw)",display:"flex",flexDirection:"column",gap:0,position:"relative",zIndex:1,boxShadow:`0 40px 100px rgba(0,0,0,0.6), 0 0 0 1px rgba(108,127,255,0.05)` }}>
-        {/* Logo */}
-        <div style={{ textAlign:"center",marginBottom:28 }}>
-          <div style={{ display:"flex",justifyContent:"center",marginBottom:16 }}><Logo size={60} /></div>
-          <div style={{ fontSize:28,fontWeight:800,color:C.text,letterSpacing:-0.8 }}>حسابي Pro</div>
-          <div style={{ fontSize:12,color:C.textMuted,marginTop:6,lineHeight:1.6 }}>نظام محاسبة متكامل للشركات والمصانع</div>
+      {/* ── Glows ── */}
+      <div style={{ position:"absolute",top:-100,right:-60,width:480,height:480,borderRadius:"50%",background:`radial-gradient(circle, ${C.accentGlow} 0%, transparent 65%)`,pointerEvents:"none" }} />
+      <div style={{ position:"absolute",bottom:-60,left:-60,width:320,height:320,borderRadius:"50%",background:"radial-gradient(circle, rgba(52,211,153,0.1) 0%, transparent 70%)",pointerEvents:"none" }} />
+      <div style={{ position:"absolute",top:"35%",left:"15%",width:180,height:180,borderRadius:"50%",background:"radial-gradient(circle, rgba(167,139,250,0.07) 0%, transparent 70%)",pointerEvents:"none" }} />
+
+      {/* ── Card ── */}
+      <div style={{ background:C.surface, border:`1px solid ${C.borderLight}`, borderRadius:28, padding:"44px 48px", width:"min(440px,92vw)", display:"flex", flexDirection:"column", position:"relative", zIndex:1, boxShadow:`0 40px 100px rgba(0,0,0,0.65), 0 0 0 1px rgba(108,127,255,0.06)` }}>
+
+        {/* Logo & title */}
+        <div style={{ textAlign:"center", marginBottom:30 }}>
+          <div style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:68, height:68, borderRadius:20, background:`linear-gradient(135deg, ${C.accent}, #818cf8)`, boxShadow:`0 8px 30px ${C.accent}40`, marginBottom:16 }}>
+            <Logo size={38} />
+          </div>
+          <div style={{ fontSize:26, fontWeight:800, color:C.text, letterSpacing:-0.5, marginBottom:6 }}>حسابي Pro</div>
+          <div style={{ fontSize:12, color:C.textMuted, lineHeight:1.7 }}>نظام محاسبة متكامل للشركات والمصانع</div>
         </div>
 
-        {/* Mode Toggle */}
-        <div style={{ display:"flex",background:C.surface2,borderRadius:14,padding:4,marginBottom:24,border:`1px solid ${C.border}` }}>
-          {[{id:"company",label:"🏢 حساب الشركة"},{id:"employee",label:"👤 دخول موظف"}].map(m=>(
-            <button key={m.id} onClick={()=>{ setMode(m.id); setErr(""); }} style={{
-              flex:1,padding:"9px 12px",borderRadius:11,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",transition:"all 0.2s",
-              background:mode===m.id?C.accent:"transparent",
-              color:mode===m.id?"#fff":C.textMuted,
-              boxShadow:mode===m.id?`0 4px 15px ${C.accent}40`:"none",
-            }}>{m.label}</button>
-          ))}
+        {/* ── Mode selector ── */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:26 }}>
+          {[
+            { id:"company",  icon:"🏢", title:"حساب الشركة",  sub:"دخول بالإيميل" },
+            { id:"employee", icon:"👤", title:"دخول موظف",    sub:"باليوزرنيم" },
+          ].map(m => {
+            const active = mode === m.id;
+            return (
+              <button key={m.id} onClick={()=>{ setMode(m.id); setErr(""); }} style={{
+                display:"flex", flexDirection:"column", alignItems:"center", gap:6,
+                padding:"16px 12px", borderRadius:16,
+                border:`1.5px solid ${active ? C.accent : C.border}`,
+                background: active ? C.accentDim : C.surface2,
+                boxShadow: active ? `0 0 0 1px ${C.accent}33, 0 6px 24px ${C.accent}14` : "none",
+                cursor:"pointer", fontFamily:"inherit", transition:"all 0.2s",
+              }}>
+                <span style={{ fontSize:22, lineHeight:1 }}>{m.icon}</span>
+                <span style={{ fontSize:13, fontWeight:700, color: active ? C.accent : C.textDim, marginTop:2 }}>{m.title}</span>
+                <span style={{ fontSize:10, color: active ? `${C.accent}88` : C.textMuted, fontWeight:500 }}>{m.sub}</span>
+              </button>
+            );
+          })}
         </div>
 
-        {err && <div style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:"11px 16px",fontSize:12,color:C.red,textAlign:"center",marginBottom:16 }}>{err}</div>}
+        {/* Error */}
+        {err && (
+          <div style={{ background:C.redDim, border:`1px solid ${C.red}33`, borderRadius:10, padding:"10px 14px", fontSize:12, color:C.red, textAlign:"center", marginBottom:14 }}>
+            {err}
+          </div>
+        )}
 
-        {mode === "company" ? (
-          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
-            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>البريد الإلكتروني</label>
-              <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} type="email" placeholder="example@company.com"
-                style={inputStyle} onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+        {/* ── Company form ── */}
+        {mode === "company" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              <label style={{ fontSize:11, color:C.textMuted, fontWeight:700, letterSpacing:0.5, textTransform:"uppercase" }}>البريد الإلكتروني</label>
+              <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} type="email"
+                placeholder="example@company.com" style={inp}
+                onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
             </div>
-            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>كلمة المرور</label>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              <label style={{ fontSize:11, color:C.textMuted, fontWeight:700, letterSpacing:0.5, textTransform:"uppercase" }}>كلمة المرور</label>
               <input type="password" placeholder="••••••••" value={form.password}
                 onChange={e=>setForm({...form,password:e.target.value})}
                 onKeyDown={e=>e.key==="Enter"&&handleLogin()}
-                style={{...inputStyle,direction:"ltr",textAlign:"right"}}
+                style={{...inp, direction:"ltr", textAlign:"right"}}
                 onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
             </div>
-            <button onClick={handleLogin} disabled={loading} style={{ background:loading?C.surface2:C.accent,color:loading?C.textMuted:"#fff",border:"none",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",boxShadow:loading?"none":`0 8px 25px ${C.accent}40`,transition:"all 0.2s",marginTop:4 }}>
+            <button onClick={handleLogin} disabled={loading} style={{
+              marginTop:4, padding:"13px", border:"none", borderRadius:12,
+              background: loading ? C.surface2 : `linear-gradient(135deg, ${C.accent}, #818cf8)`,
+              color: loading ? C.textMuted : "#fff",
+              fontSize:14, fontWeight:700, cursor: loading ? "not-allowed" : "pointer",
+              fontFamily:"inherit", boxShadow: loading ? "none" : `0 8px 28px ${C.accent}44`,
+              transition:"all 0.2s",
+            }}>
               {loading ? "جاري تسجيل الدخول..." : "دخول"}
             </button>
           </div>
-        ) : (
-          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
-            <div style={{ background:C.accentDim,border:`1px solid ${C.accent}22`,borderRadius:12,padding:"12px 16px",fontSize:12,color:C.accent,lineHeight:1.7 }}>
-              💡 أدخل اليوزرنيم والباسورد الخاص بيك كموظف، اللي أعطاهولك مدير الشركة
-            </div>
-            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>اسم المستخدم (Username)</label>
-              <input value={empForm.username} onChange={e=>setEmpForm({...empForm,username:e.target.value})} placeholder="ahmed_sales"
-                style={{...inputStyle,direction:"ltr",textAlign:"right"}}
+        )}
+
+        {/* ── Employee form ── */}
+        {mode === "employee" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              <label style={{ fontSize:11, color:C.textMuted, fontWeight:700, letterSpacing:0.5, textTransform:"uppercase" }}>اسم المستخدم</label>
+              <input value={empForm.username} onChange={e=>setEmpForm({...empForm,username:e.target.value})}
+                placeholder="ahmed_sales"
+                style={{...inp, direction:"ltr", textAlign:"right"}}
                 onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
             </div>
-            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>كلمة المرور</label>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              <label style={{ fontSize:11, color:C.textMuted, fontWeight:700, letterSpacing:0.5, textTransform:"uppercase" }}>كلمة المرور</label>
               <input type="password" placeholder="••••••••" value={empForm.password}
                 onChange={e=>setEmpForm({...empForm,password:e.target.value})}
                 onKeyDown={e=>e.key==="Enter"&&handleEmployeeLogin()}
-                style={{...inputStyle,direction:"ltr",textAlign:"right"}}
+                style={{...inp, direction:"ltr", textAlign:"right"}}
                 onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
             </div>
-            <button onClick={handleEmployeeLogin} disabled={loading} style={{ background:loading?C.surface2:C.green,color:loading?C.textMuted:"#fff",border:"none",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",boxShadow:loading?"none":`0 8px 25px rgba(52,211,153,0.4)`,transition:"all 0.2s",marginTop:4 }}>
+            <button onClick={handleEmployeeLogin} disabled={loading} style={{
+              marginTop:4, padding:"13px", border:"none", borderRadius:12,
+              background: loading ? C.surface2 : `linear-gradient(135deg, ${C.green}, #10b981)`,
+              color: loading ? C.textMuted : "#fff",
+              fontSize:14, fontWeight:700, cursor: loading ? "not-allowed" : "pointer",
+              fontFamily:"inherit", boxShadow: loading ? "none" : `0 8px 28px rgba(52,211,153,0.4)`,
+              transition:"all 0.2s",
+            }}>
               {loading ? "جاري التحقق..." : "دخول كموظف"}
             </button>
           </div>
         )}
 
-        <div style={{ textAlign:"center",fontSize:11,color:C.textMuted,borderTop:`1px solid ${C.border}`,paddingTop:16,marginTop:24 }}>للحصول على حساب، تواصل مع الإدارة</div>
+        <div style={{ textAlign:"center", fontSize:11, color:C.textMuted, borderTop:`1px solid ${C.border}`, paddingTop:16, marginTop:24 }}>
+          للحصول على حساب، تواصل مع الإدارة
+        </div>
       </div>
     </div>
   );
@@ -937,10 +976,16 @@ function AdminPanel() {
           company_name: newUser.company || "",
           is_active: true,
         }, { onConflict: "id" });
+        // Add to local list immediately without waiting for DB reload
+        setUsers(prev => {
+          const exists = prev.some(u => u.id === data.user.id);
+          if (exists) return prev;
+          return [{ id: data.user.id, email: newUser.email, company_name: newUser.company||"", is_active: true, created_at: new Date().toISOString() }, ...prev];
+        });
       }
       showMsg(`✓ تم إضافة ${newUser.email} بنجاح — يحتاج تأكيد إيميل`);
       setNewUser({ email:"", password:"", company:"" }); setShowAdd(false);
-      setTimeout(loadUsers, 1500);
+      setTimeout(loadUsers, 3000);
     } catch(e) { showMsg(e.message, "error"); }
     setAdding(false);
   };
@@ -3258,6 +3303,17 @@ export default function App() {
   const [subUser, setSubUser] = useState(null); // { id, owner_id, username, role, allowed_pages, can_add, can_delete, can_edit }
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // ── Auto-logout when tab/window hidden (laptop lid close) ──
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        supabase.auth.signOut();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
   const checkSubscription = async (uid) => {
     if (!uid) return;
     try {
@@ -3549,7 +3605,13 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
       </div>
 
       {/* ── Main Content ── */}
-      <div style={{ flex:1,marginRight:W,padding:"28px 30px",minHeight:"100vh",overflowY:"auto",transition:"margin-right 0.25s cubic-bezier(0.4,0,0.2,1)" }}>
+      <div style={{ flex:1,marginRight:W,padding:"28px 30px",minHeight:"100vh",overflowY:"auto",transition:"margin-right 0.25s cubic-bezier(0.4,0,0.2,1)",scrollbarWidth:"thin",scrollbarColor:`${C.surface3} transparent` }}>
+        <style>{`
+          ::-webkit-scrollbar{width:5px;height:5px}
+          ::-webkit-scrollbar-track{background:transparent}
+          ::-webkit-scrollbar-thumb{background:${C.surface3};border-radius:6px}
+          ::-webkit-scrollbar-thumb:hover{background:${C.borderLight}}
+        `}</style>
         {renderPage()}
       </div>
     </div>
