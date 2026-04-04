@@ -928,7 +928,8 @@ function AdminPanel() {
   // ── Load company clients ──
   const loadUsers = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("profiles").select("*");
+    if (error) console.error("loadUsers error:", error.message);
     if (!error) setUsers(data || []);
     setLoading(false);
   };
@@ -936,7 +937,8 @@ function AdminPanel() {
   // ── Load sub-users ──
   const loadSubUsers = async () => {
     setSubLoading(true);
-    const { data, error } = await supabase.from("sub_users").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("sub_users").select("*");
+    if (error) console.error("loadSubUsers error:", error.message);
     if (!error) setSubUsers(data || []);
     setSubLoading(false);
   };
