@@ -623,7 +623,7 @@ const Sel = ({ label, value, onChange, options, placeholder="-- اختر --" }) 
 
 const Modal = ({ title, onClose, children, wide=false }) => (
   <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16 }}>
-    <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:20,padding:28,width:wide?"min(780px,95vw)":"min(540px,95vw)",maxHeight:"90vh",overflowY:"auto",boxShadow:`0 30px 80px rgba(0,0,0,0.7)` }}>
+    <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:20,padding:28,width:wide?"min(780px,95vw)":"min(540px,95vw)",maxHeight:"90vh",overflowY:"auto",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,boxShadow:`0 30px 80px rgba(0,0,0,0.7)` }}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:22 }}>
         <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>{title}</h2>
         <button onClick={onClose} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
@@ -961,6 +961,9 @@ function AdminPanel() {
     if (newUser.password.length < 6) { showMsg("كلمة المرور 6 أحرف على الأقل", "error"); return; }
     setAdding(true);
     try {
+      // Save admin session BEFORE signUp (signUp auto-logs in the new user and kicks admin out)
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
+
       // Use signUp — this works with publishable key
       const { data, error } = await supabase.auth.signUp({
         email: newUser.email,
@@ -968,7 +971,16 @@ function AdminPanel() {
         options: { data: { company_name: newUser.company || "" } }
       });
       if (error) { showMsg(error.message, "error"); setAdding(false); return; }
-      // Update profile if created
+
+      // Restore admin session immediately after signUp hijacks it
+      if (adminSession?.access_token) {
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
+        });
+      }
+
+      // Update profile if user was created
       if (data.user) {
         await supabase.from("profiles").upsert({
           id: data.user.id,
@@ -983,9 +995,9 @@ function AdminPanel() {
           return [{ id: data.user.id, email: newUser.email, company_name: newUser.company||"", is_active: true, created_at: new Date().toISOString() }, ...prev];
         });
       }
-      showMsg(`✓ تم إضافة ${newUser.email} بنجاح — يحتاج تأكيد إيميل`);
+      showMsg(`✓ تم إضافة ${newUser.email} بنجاح`);
       setNewUser({ email:"", password:"", company:"" }); setShowAdd(false);
-      setTimeout(loadUsers, 3000);
+      setTimeout(loadUsers, 2000);
     } catch(e) { showMsg(e.message, "error"); }
     setAdding(false);
   };
@@ -1209,7 +1221,7 @@ function AdminPanel() {
       {/* ── Add Sub-User Modal ── */}
       {showSubAdd && (
         <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16 }}>
-          <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:22,padding:32,width:"min(640px,95vw)",maxHeight:"90vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:18 }}>
+          <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:22,padding:32,width:"min(640px,95vw)",maxHeight:"90vh",overflowY:"auto",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,display:"flex",flexDirection:"column",gap:18 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
               <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>👤 إضافة موظف جديد</h2>
               <button onClick={()=>setShowSubAdd(false)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
@@ -3303,15 +3315,25 @@ export default function App() {
   const [subUser, setSubUser] = useState(null); // { id, owner_id, username, role, allowed_pages, can_add, can_delete, can_edit }
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // ── Auto-logout when tab/window hidden (laptop lid close) ──
+  // ── Auto-logout only when tab is closed or browser is closed (NOT on tab switch) ──
   useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === "hidden") {
+    // pagehide fires when tab is closed/navigated away (more reliable than beforeunload)
+    const handlePageHide = (e) => {
+      // e.persisted = true means page went into bfcache (tab switch / back button), don't logout
+      if (!e.persisted) {
         supabase.auth.signOut();
       }
     };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
+    // beforeunload as a fallback for browsers that don't fully support pagehide
+    const handleBeforeUnload = () => {
+      supabase.auth.signOut();
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
   }, []);
 
   const checkSubscription = async (uid) => {
@@ -3605,12 +3627,13 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
       </div>
 
       {/* ── Main Content ── */}
-      <div style={{ flex:1,marginRight:W,padding:"28px 30px",minHeight:"100vh",overflowY:"auto",transition:"margin-right 0.25s cubic-bezier(0.4,0,0.2,1)",scrollbarWidth:"thin",scrollbarColor:`${C.surface3} transparent` }}>
+      <div style={{ flex:1,marginRight:W,padding:"28px 30px",minHeight:"100vh",overflowY:"auto",transition:"margin-right 0.25s cubic-bezier(0.4,0,0.2,1)",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent` }}>
         <style>{`
-          ::-webkit-scrollbar{width:5px;height:5px}
-          ::-webkit-scrollbar-track{background:transparent}
-          ::-webkit-scrollbar-thumb{background:${C.surface3};border-radius:6px}
-          ::-webkit-scrollbar-thumb:hover{background:${C.borderLight}}
+          *::-webkit-scrollbar{width:4px;height:4px}
+          *::-webkit-scrollbar-track{background:transparent}
+          *::-webkit-scrollbar-thumb{background:${C.border};border-radius:4px}
+          *::-webkit-scrollbar-thumb:hover{background:${C.borderLight}}
+          *{scrollbar-width:thin;scrollbar-color:${C.border} transparent}
         `}</style>
         {renderPage()}
       </div>
