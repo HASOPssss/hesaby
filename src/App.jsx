@@ -110,7 +110,7 @@ function useAppData(userId) {
 
   const actions = {
     addSale: async (invoice) => {
-      const record = { ...invoice, type: "sale" };
+      const record = { ...invoice, type: "sale", createdAt: new Date().toISOString() };
       for (const item of (invoice.items || [])) if (item.category) await ensureCategory(item.category);
       await saveData("sales", record);
       setData(prev => ({ ...prev, salesInvoices: [...prev.salesInvoices, record] }));
@@ -120,7 +120,7 @@ function useAppData(userId) {
       setData(prev => ({ ...prev, salesInvoices: prev.salesInvoices.filter(i => i.id !== id) }));
     },
     addPurchase: async (invoice) => {
-      const record = { ...invoice, type: "purchase" };
+      const record = { ...invoice, type: "purchase", createdAt: new Date().toISOString() };
       for (const item of (invoice.items || [])) if (item.category) await ensureCategory(item.category);
       await saveData("purchases", record);
       setData(prev => ({ ...prev, purchaseInvoices: [...prev.purchaseInvoices, record] }));
@@ -130,7 +130,7 @@ function useAppData(userId) {
       setData(prev => ({ ...prev, purchaseInvoices: prev.purchaseInvoices.filter(i => i.id !== id) }));
     },
     addReturn: async (ret) => {
-      const record = { ...ret, type: "return" };
+      const record = { ...ret, type: "return", createdAt: new Date().toISOString() };
       await saveData("returns", record);
       setData(prev => ({ ...prev, returns: [...prev.returns, record] }));
     },
@@ -272,10 +272,21 @@ const I = {
   chartBar: "M18 20V10M12 20V4M6 20v-6",
   moon: "M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z",
   stock: "M3 3h18v18H3zM3 9h18M9 21V9",
+  factory: "M2 20V8l6-4 6 4V4l6 4v12H2zM10 20v-5h4v5",
+  money: "M12 1v22M17 5H9.5a3.5 3.5 0 100 7h5a3.5 3.5 0 110 7H6",
+  people: "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75",
 };
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const fmt = (n) => (n ?? 0).toLocaleString("ar-EG") + " ج.م";
+const fmtDateTime = (dateStr) => {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  const date = d.toLocaleDateString("ar-EG", { year:"numeric", month:"2-digit", day:"2-digit" });
+  const time = d.toLocaleTimeString("ar-EG", { hour:"2-digit", minute:"2-digit" });
+  return `${date} — ${time}`;
+};
+const nowISO = () => new Date().toISOString();
 const fmtNum = (n) => (n ?? 0).toLocaleString("ar-EG");
 const today = () => new Date().toISOString().split("T")[0];
 const getMonth = (d) => d?.slice(0, 7);
@@ -698,8 +709,12 @@ function SubscriptionExpired() {
 }
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
-function LoginScreen() {
+// Sub-user login: stored in Supabase table "sub_users" with owner_id, username, password_hash, role, allowed_pages
+// We do client-side lookup since we can't use admin SDK on frontend
+function LoginScreen({ onSubUserLogin }) {
+  const [mode, setMode] = useState("company"); // "company" | "employee"
   const [form, setForm] = useState({ email:"", password:"" });
+  const [empForm, setEmpForm] = useState({ username:"", password:"" });
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -717,39 +732,138 @@ function LoginScreen() {
     setLoading(false);
   };
 
+  const handleEmployeeLogin = async () => {
+    if (!empForm.username || !empForm.password) { setErr("أدخل اسم المستخدم وكلمة المرور"); return; }
+    setErr(""); setLoading(true);
+    try {
+      // Look up sub_user by username (case-insensitive)
+      const { data: subUsers, error } = await supabase
+        .from("sub_users")
+        .select("*")
+        .ilike("username", empForm.username.trim());
+      if (error) { setErr("حدث خطأ في الاتصال"); setLoading(false); return; }
+      if (!subUsers || subUsers.length === 0) { setErr("اسم المستخدم غير موجود"); setLoading(false); return; }
+      const su = subUsers[0];
+      if (su.password_plain !== empForm.password) { setErr("كلمة المرور غير صحيحة"); setLoading(false); return; }
+      if (!su.is_active) { setErr("هذا الحساب معطّل، تواصل مع المسؤول"); setLoading(false); return; }
+      // Now sign in as the owner to get data access
+      onSubUserLogin(su);
+    } catch(e){ setErr(e.message); }
+    setLoading(false);
+  };
+
+  const inputStyle = { background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"11px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box",transition:"border-color 0.2s" };
+
   return (
     <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl",position:"relative",overflow:"hidden" }}>
-      <div style={{ position:"absolute",top:-100,right:-100,width:400,height:400,borderRadius:"50%",background:`radial-gradient(circle, ${C.accentGlow} 0%, transparent 70%)`,pointerEvents:"none" }} />
-      <div style={{ position:"absolute",bottom:-100,left:-100,width:300,height:300,borderRadius:"50%",background:`radial-gradient(circle, ${C.greenDim} 0%, transparent 70%)`,pointerEvents:"none" }} />
-      <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:24,padding:"44px 48px",width:"min(420px,92vw)",display:"flex",flexDirection:"column",gap:22,position:"relative",zIndex:1,boxShadow:`0 40px 100px rgba(0,0,0,0.5)` }}>
-        <div style={{ textAlign:"center" }}>
-          <div style={{ display:"flex",justifyContent:"center",marginBottom:18 }}><Logo size={56} /></div>
-          <div style={{ fontSize:26,fontWeight:800,color:C.text,letterSpacing:-0.5 }}>حسابي Pro</div>
-          <div style={{ fontSize:12,color:C.textMuted,marginTop:5 }}>نظام محاسبة متكامل للشركات والمصانع</div>
+      {/* Ambient glows */}
+      <div style={{ position:"absolute",top:-120,right:-80,width:500,height:500,borderRadius:"50%",background:`radial-gradient(circle, ${C.accentGlow} 0%, transparent 65%)`,pointerEvents:"none" }} />
+      <div style={{ position:"absolute",bottom:-80,left:-80,width:350,height:350,borderRadius:"50%",background:`radial-gradient(circle, rgba(52,211,153,0.12) 0%, transparent 70%)`,pointerEvents:"none" }} />
+      <div style={{ position:"absolute",top:"40%",left:"20%",width:200,height:200,borderRadius:"50%",background:`radial-gradient(circle, rgba(167,139,250,0.08) 0%, transparent 70%)`,pointerEvents:"none" }} />
+
+      <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:28,padding:"44px 48px",width:"min(440px,92vw)",display:"flex",flexDirection:"column",gap:0,position:"relative",zIndex:1,boxShadow:`0 40px 100px rgba(0,0,0,0.6), 0 0 0 1px rgba(108,127,255,0.05)` }}>
+        {/* Logo */}
+        <div style={{ textAlign:"center",marginBottom:28 }}>
+          <div style={{ display:"flex",justifyContent:"center",marginBottom:16 }}><Logo size={60} /></div>
+          <div style={{ fontSize:28,fontWeight:800,color:C.text,letterSpacing:-0.8 }}>حسابي Pro</div>
+          <div style={{ fontSize:12,color:C.textMuted,marginTop:6,lineHeight:1.6 }}>نظام محاسبة متكامل للشركات والمصانع</div>
         </div>
-        {err && <div style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:"11px 16px",fontSize:12,color:C.red,textAlign:"center" }}>{err}</div>}
-        <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
-          <Inp label="البريد الإلكتروني" value={form.email} onChange={v=>setForm({...form,email:v})} type="email" placeholder="example@company.com" />
-          <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
-            <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>كلمة المرور</label>
-            <input type="password" placeholder="••••••••" value={form.password}
-              onChange={e=>setForm({...form,password:e.target.value})}
-              onKeyDown={e=>e.key==="Enter"&&handleLogin()}
-              style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",direction:"ltr",textAlign:"right" }}
-              onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+
+        {/* Mode Toggle */}
+        <div style={{ display:"flex",background:C.surface2,borderRadius:14,padding:4,marginBottom:24,border:`1px solid ${C.border}` }}>
+          {[{id:"company",label:"🏢 حساب الشركة"},{id:"employee",label:"👤 دخول موظف"}].map(m=>(
+            <button key={m.id} onClick={()=>{ setMode(m.id); setErr(""); }} style={{
+              flex:1,padding:"9px 12px",borderRadius:11,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",transition:"all 0.2s",
+              background:mode===m.id?C.accent:"transparent",
+              color:mode===m.id?"#fff":C.textMuted,
+              boxShadow:mode===m.id?`0 4px 15px ${C.accent}40`:"none",
+            }}>{m.label}</button>
+          ))}
+        </div>
+
+        {err && <div style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:"11px 16px",fontSize:12,color:C.red,textAlign:"center",marginBottom:16 }}>{err}</div>}
+
+        {mode === "company" ? (
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>البريد الإلكتروني</label>
+              <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} type="email" placeholder="example@company.com"
+                style={inputStyle} onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+            </div>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>كلمة المرور</label>
+              <input type="password" placeholder="••••••••" value={form.password}
+                onChange={e=>setForm({...form,password:e.target.value})}
+                onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+                style={{...inputStyle,direction:"ltr",textAlign:"right"}}
+                onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+            </div>
+            <button onClick={handleLogin} disabled={loading} style={{ background:loading?C.surface2:C.accent,color:loading?C.textMuted:"#fff",border:"none",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",boxShadow:loading?"none":`0 8px 25px ${C.accent}40`,transition:"all 0.2s",marginTop:4 }}>
+              {loading ? "جاري تسجيل الدخول..." : "دخول"}
+            </button>
           </div>
-        </div>
-        <button onClick={handleLogin} disabled={loading} style={{ background:loading?C.surface2:C.accent,color:loading?C.textMuted:"#fff",border:"none",borderRadius:11,padding:13,fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",boxShadow:loading?"none":`0 8px 25px ${C.accent}40`,transition:"all 0.2s" }}>
-          {loading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
-        </button>
-        <div style={{ textAlign:"center",fontSize:11,color:C.textMuted,borderTop:`1px solid ${C.border}`,paddingTop:14 }}>للحصول على حساب، تواصل مع الإدارة</div>
+        ) : (
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ background:C.accentDim,border:`1px solid ${C.accent}22`,borderRadius:12,padding:"12px 16px",fontSize:12,color:C.accent,lineHeight:1.7 }}>
+              💡 أدخل اليوزرنيم والباسورد الخاص بيك كموظف، اللي أعطاهولك مدير الشركة
+            </div>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>اسم المستخدم (Username)</label>
+              <input value={empForm.username} onChange={e=>setEmpForm({...empForm,username:e.target.value})} placeholder="ahmed_sales"
+                style={{...inputStyle,direction:"ltr",textAlign:"right"}}
+                onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+            </div>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>كلمة المرور</label>
+              <input type="password" placeholder="••••••••" value={empForm.password}
+                onChange={e=>setEmpForm({...empForm,password:e.target.value})}
+                onKeyDown={e=>e.key==="Enter"&&handleEmployeeLogin()}
+                style={{...inputStyle,direction:"ltr",textAlign:"right"}}
+                onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+            </div>
+            <button onClick={handleEmployeeLogin} disabled={loading} style={{ background:loading?C.surface2:C.green,color:loading?C.textMuted:"#fff",border:"none",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",boxShadow:loading?"none":`0 8px 25px rgba(52,211,153,0.4)`,transition:"all 0.2s",marginTop:4 }}>
+              {loading ? "جاري التحقق..." : "دخول كموظف"}
+            </button>
+          </div>
+        )}
+
+        <div style={{ textAlign:"center",fontSize:11,color:C.textMuted,borderTop:`1px solid ${C.border}`,paddingTop:16,marginTop:24 }}>للحصول على حساب، تواصل مع الإدارة</div>
       </div>
     </div>
   );
 }
 
+// ─── ALL PAGES LIST (for permissions) ─────────────────────────────────────────
+const ALL_PAGES = [
+  { id:"dash", label:"الرئيسية" },
+  { id:"sales", label:"المبيعات" },
+  { id:"purchases", label:"المشتريات" },
+  { id:"returns", label:"المرتجعات" },
+  { id:"revenue", label:"الإيرادات" },
+  { id:"expenses", label:"المصروفات" },
+  { id:"taxinvoices", label:"الفواتير الضريبية" },
+  { id:"clients", label:"العملاء" },
+  { id:"suppliers", label:"الموردين" },
+  { id:"reports", label:"التقارير المالية" },
+  { id:"taxreports", label:"التقارير الضريبية" },
+  { id:"production", label:"تكلفة الإنتاج" },
+  { id:"employees", label:"الموظفين" },
+  { id:"inventory", label:"إدارة المخزون" },
+  { id:"stocktake", label:"الجرد الشهري" },
+  { id:"inventoryitems", label:"الأصناف" },
+  { id:"categories", label:"الفئات" },
+];
+
+const ROLE_PRESETS = {
+  "مشاهدة فقط": { canAdd:false, canDelete:false, canEdit:false },
+  "إضافة فقط":  { canAdd:true,  canDelete:false, canEdit:false },
+  "إضافة وتعديل": { canAdd:true,  canDelete:false, canEdit:true },
+  "صلاحيات كاملة": { canAdd:true,  canDelete:true,  canEdit:true },
+};
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 function AdminPanel() {
+  const [activeTab, setActiveTab] = useState("clients"); // clients | subusers
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -758,8 +872,18 @@ function AdminPanel() {
   const [msg, setMsg] = useState({ text:"", type:"" });
   const [toggling, setToggling] = useState(null);
 
-  const showMsg = (text, type="success") => { setMsg({ text, type }); setTimeout(()=>setMsg({text:"",type:""}),3500); };
+  // Sub-users state
+  const [subUsers, setSubUsers] = useState([]);
+  const [subLoading, setSubLoading] = useState(false);
+  const [showSubAdd, setShowSubAdd] = useState(false);
+  const [selectedOwner, setSelectedOwner] = useState(""); // owner profile id
+  const [subForm, setSubForm] = useState({ username:"", password:"", display_name:"", role:"مشاهدة فقط", allowed_pages: ALL_PAGES.map(p=>p.id) });
+  const [addingSub, setAddingSub] = useState(false);
+  const [togglingSubId, setTogglingSubId] = useState(null);
 
+  const showMsg = (text, type="success") => { setMsg({ text, type }); setTimeout(()=>setMsg({text:"",type:""}),4000); };
+
+  // ── Load company clients ──
   const loadUsers = async () => {
     setLoading(true);
     const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
@@ -767,8 +891,17 @@ function AdminPanel() {
     setLoading(false);
   };
 
-  useEffect(() => { loadUsers(); }, []);
+  // ── Load sub-users ──
+  const loadSubUsers = async () => {
+    setSubLoading(true);
+    const { data, error } = await supabase.from("sub_users").select("*").order("created_at", { ascending: false });
+    if (!error) setSubUsers(data || []);
+    setSubLoading(false);
+  };
 
+  useEffect(() => { loadUsers(); loadSubUsers(); }, []);
+
+  // ── Toggle client subscription ──
   const toggleUser = async (user) => {
     setToggling(user.id);
     const newStatus = !user.is_active;
@@ -780,91 +913,356 @@ function AdminPanel() {
     setToggling(null);
   };
 
+  // ── Add new company client via Supabase signup trick ──
   const addUser = async () => {
     if (!newUser.email || !newUser.password) { showMsg("أدخل الإيميل وكلمة المرور", "error"); return; }
     if (newUser.password.length < 6) { showMsg("كلمة المرور 6 أحرف على الأقل", "error"); return; }
     setAdding(true);
     try {
-      const { data, error } = await supabase.auth.admin.createUser({ email: newUser.email, password: newUser.password, email_confirm: true });
+      // Use signUp — this works with publishable key
+      const { data, error } = await supabase.auth.signUp({
+        email: newUser.email,
+        password: newUser.password,
+        options: { data: { company_name: newUser.company || "" } }
+      });
       if (error) { showMsg(error.message, "error"); setAdding(false); return; }
-      if (newUser.company && data.user) await supabase.from("profiles").update({ company_name: newUser.company }).eq("id", data.user.id);
-      showMsg(`✓ تم إضافة ${newUser.email} بنجاح`);
+      // Update profile if created
+      if (data.user) {
+        await supabase.from("profiles").upsert({
+          id: data.user.id,
+          email: newUser.email,
+          company_name: newUser.company || "",
+          is_active: true,
+        }, { onConflict: "id" });
+      }
+      showMsg(`✓ تم إضافة ${newUser.email} بنجاح — يحتاج تأكيد إيميل`);
       setNewUser({ email:"", password:"", company:"" }); setShowAdd(false);
-      await loadUsers();
+      setTimeout(loadUsers, 1500);
     } catch(e) { showMsg(e.message, "error"); }
     setAdding(false);
   };
 
-  const activeCount = users.filter(u => u.is_active && u.email !== ADMIN_EMAIL).length;
-  const totalCount = users.filter(u => u.email !== ADMIN_EMAIL).length;
+  // ── Add sub-user (employee) ──
+  const addSubUser = async () => {
+    if (!subForm.username.trim() || !subForm.password) { showMsg("أدخل اسم المستخدم وكلمة المرور", "error"); return; }
+    if (!selectedOwner) { showMsg("اختر حساب الشركة", "error"); return; }
+    // Check username unique
+    const exists = subUsers.some(su => su.username.toLowerCase() === subForm.username.trim().toLowerCase());
+    if (exists) { showMsg("اسم المستخدم موجود بالفعل", "error"); return; }
+    setAddingSub(true);
+    const perms = ROLE_PRESETS[subForm.role] || ROLE_PRESETS["مشاهدة فقط"];
+    const { error } = await supabase.from("sub_users").insert({
+      owner_id: selectedOwner,
+      username: subForm.username.trim().toLowerCase(),
+      password_plain: subForm.password,
+      display_name: subForm.display_name || subForm.username,
+      role: subForm.role,
+      allowed_pages: subForm.allowed_pages,
+      can_add: perms.canAdd,
+      can_delete: perms.canDelete,
+      can_edit: perms.canEdit,
+      is_active: true,
+    });
+    if (error) { showMsg("خطأ: " + error.message, "error"); }
+    else {
+      showMsg(`✓ تم إضافة الموظف "${subForm.username}" بنجاح`);
+      setSubForm({ username:"", password:"", display_name:"", role:"مشاهدة فقط", allowed_pages: ALL_PAGES.map(p=>p.id) });
+      setShowSubAdd(false);
+      loadSubUsers();
+    }
+    setAddingSub(false);
+  };
+
+  const toggleSubUser = async (su) => {
+    setTogglingSubId(su.id);
+    const newStatus = !su.is_active;
+    const { error } = await supabase.from("sub_users").update({ is_active: newStatus }).eq("id", su.id);
+    if (!error) {
+      setSubUsers(prev => prev.map(s => s.id === su.id ? { ...s, is_active: newStatus } : s));
+      showMsg(newStatus ? `✓ تم تفعيل ${su.username}` : `✓ تم تعطيل ${su.username}`, newStatus ? "success" : "warning");
+    } else showMsg("حدث خطأ", "error");
+    setTogglingSubId(null);
+  };
+
+  const deleteSubUser = async (id) => {
+    const { error } = await supabase.from("sub_users").delete().eq("id", id);
+    if (!error) { setSubUsers(prev => prev.filter(s => s.id !== id)); showMsg("✓ تم الحذف"); }
+    else showMsg("خطأ في الحذف", "error");
+  };
+
+  const clientUsers = users.filter(u => u.email !== ADMIN_EMAIL);
+  const activeCount = clientUsers.filter(u => u.is_active).length;
+
+  const tabStyle = (id) => ({
+    padding:"10px 24px",borderRadius:10,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",transition:"all 0.2s",
+    background: activeTab===id ? C.accent : "transparent",
+    color: activeTab===id ? "#fff" : C.textMuted,
+    boxShadow: activeTab===id ? `0 4px 15px ${C.accent}40` : "none",
+  });
 
   return (
-    <div style={{ minHeight:"100vh",background:C.bg,fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl",padding:"28px 32px" }}>
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:28 }}>
+    <div style={{ minHeight:"100vh",background:C.bg,fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl",padding:"24px 28px" }}>
+      {/* Header */}
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24 }}>
         <div style={{ display:"flex",alignItems:"center",gap:14 }}>
-          <Logo size={40} />
+          <Logo size={42} />
           <div>
-            <div style={{ fontSize:22,fontWeight:800,color:C.text }}>لوحة الإدارة</div>
-            <div style={{ fontSize:12,color:C.textMuted,marginTop:2 }}>إدارة حسابات العملاء والاشتراكات</div>
+            <div style={{ fontSize:22,fontWeight:800,color:C.text }}>لوحة إدارة حسابي Pro</div>
+            <div style={{ fontSize:12,color:C.textMuted,marginTop:2 }}>إدارة شاملة للعملاء والموظفين والصلاحيات</div>
           </div>
         </div>
         <div style={{ display:"flex",gap:10,alignItems:"center" }}>
-          {msg.text && <div style={{ background:msg.type==="success"?C.greenDim:msg.type==="warning"?C.yellowDim:C.redDim,border:`1px solid ${msg.type==="success"?C.green:msg.type==="warning"?C.yellow:C.red}33`,color:msg.type==="success"?C.green:msg.type==="warning"?C.yellow:C.red,borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:600 }}>{msg.text}</div>}
-          <Btn onClick={()=>setShowAdd(true)}><Ic d={I.userPlus} s={15} />إضافة عميل</Btn>
+          {msg.text && (
+            <div style={{ background:msg.type==="success"?C.greenDim:msg.type==="warning"?C.yellowDim:C.redDim,border:`1px solid ${msg.type==="success"?C.green:msg.type==="warning"?C.yellow:C.red}33`,color:msg.type==="success"?C.green:msg.type==="warning"?C.yellow:C.red,borderRadius:10,padding:"8px 18px",fontSize:12,fontWeight:700,maxWidth:320 }}>
+              {msg.text}
+            </div>
+          )}
           <Btn variant="danger" onClick={()=>supabase.auth.signOut()}><Ic d={I.logout} s={14} />خروج</Btn>
         </div>
       </div>
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24 }}>
-        {[{label:"إجمالي العملاء",value:totalCount,color:C.accent},{label:"الاشتراكات الفعالة",value:activeCount,color:C.green},{label:"الاشتراكات المعطلة",value:totalCount-activeCount,color:C.red}].map(s=>(
-          <div key={s.label} style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"20px 24px",borderTop:`3px solid ${s.color}` }}>
-            <div style={{ fontSize:11,color:C.textMuted,fontWeight:600,marginBottom:8 }}>{s.label}</div>
-            <div style={{ fontSize:28,fontWeight:800,color:s.color }}>{s.value}</div>
+
+      {/* Stats */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24 }}>
+        {[
+          {label:"إجمالي الشركات",value:clientUsers.length,color:C.accent,icon:I.clients},
+          {label:"اشتراكات فعالة",value:activeCount,color:C.green,icon:I.shield},
+          {label:"اشتراكات معطلة",value:clientUsers.length-activeCount,color:C.red,icon:I.alert},
+          {label:"إجمالي الموظفين",value:subUsers.length,color:C.purple,icon:I.people},
+        ].map(s=>(
+          <div key={s.label} style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:"18px 22px",borderTop:`3px solid ${s.color}`,display:"flex",alignItems:"center",gap:14 }}>
+            <div style={{ background:s.color+"18",padding:10,borderRadius:12 }}><Ic d={s.icon} s={20} c={s.color} /></div>
+            <div>
+              <div style={{ fontSize:11,color:C.textMuted,fontWeight:600,marginBottom:4 }}>{s.label}</div>
+              <div style={{ fontSize:26,fontWeight:800,color:s.color }}>{s.value}</div>
+            </div>
           </div>
         ))}
       </div>
-      <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden" }}>
-        <div style={{ padding:"14px 20px",borderBottom:`1px solid ${C.border}`,fontSize:14,fontWeight:700,color:C.text }}>قائمة العملاء</div>
-        {loading ? <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>جاري التحميل...</div> : (
-          <table style={{ width:"100%",borderCollapse:"collapse" }}>
-            <THead cols={["البريد الإلكتروني","اسم الشركة","تاريخ الإنشاء","حالة الاشتراك","التحكم"]} />
-            <tbody>
-              {users.filter(u=>u.email!==ADMIN_EMAIL).map((u,i)=>(
-                <TRow key={u.id} alt={i%2}>
-                  <TD>{u.email}</TD>
-                  <TD color={C.textDim}>{u.company_name||"—"}</TD>
-                  <TD color={C.textMuted}>{new Date(u.created_at).toLocaleDateString("ar-EG")}</TD>
-                  <td style={{ padding:"11px 14px" }}><Badge label={u.is_active?"مدفوعة":"غير مدفوعة"} /></td>
-                  <td style={{ padding:"11px 14px" }}>
-                    <button onClick={()=>toggleUser(u)} disabled={toggling===u.id}
-                      style={{ background:u.is_active?C.redDim:C.greenDim,color:u.is_active?C.red:C.green,border:`1px solid ${u.is_active?C.red:C.green}33`,borderRadius:8,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
-                      {toggling===u.id?"جاري...":(u.is_active?"إيقاف":"تفعيل")}
-                    </button>
-                  </td>
-                </TRow>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {!loading && users.filter(u=>u.email!==ADMIN_EMAIL).length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>لا يوجد عملاء بعد</div>}
+
+      {/* Tabs */}
+      <div style={{ display:"flex",gap:6,marginBottom:20,background:C.surface2,padding:4,borderRadius:14,border:`1px solid ${C.border}`,width:"fit-content" }}>
+        <button style={tabStyle("clients")} onClick={()=>setActiveTab("clients")}>🏢 إدارة الشركات العملاء</button>
+        <button style={tabStyle("subusers")} onClick={()=>setActiveTab("subusers")}>👥 إدارة موظفي الشركات</button>
       </div>
+
+      {/* ── Clients Tab ── */}
+      {activeTab === "clients" && (
+        <div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ fontSize:16,fontWeight:700,color:C.text }}>قائمة الشركات العملاء</div>
+            <Btn onClick={()=>setShowAdd(true)}><Ic d={I.userPlus} s={14} />إضافة شركة جديدة</Btn>
+          </div>
+          <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden" }}>
+            {loading ? <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>جاري التحميل...</div> : (
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["البريد الإلكتروني","اسم الشركة","تاريخ الإنشاء","الموظفون","الحالة","التحكم"]} />
+                <tbody>
+                  {clientUsers.map((u,i)=>{
+                    const empCount = subUsers.filter(su=>su.owner_id===u.id).length;
+                    return (
+                      <TRow key={u.id} alt={i%2}>
+                        <TD><span style={{ fontWeight:600 }}>{u.email}</span></TD>
+                        <TD color={C.textDim}>{u.company_name||"—"}</TD>
+                        <TD color={C.textMuted}>{new Date(u.created_at).toLocaleDateString("ar-EG")}</TD>
+                        <TD><span style={{ background:C.purpleDim,color:C.purple,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>{empCount} موظف</span></TD>
+                        <td style={{ padding:"11px 14px" }}><Badge label={u.is_active?"مدفوعة":"غير مدفوعة"} /></td>
+                        <td style={{ padding:"11px 14px",display:"flex",gap:8,alignItems:"center" }}>
+                          <button onClick={()=>toggleUser(u)} disabled={toggling===u.id}
+                            style={{ background:u.is_active?C.redDim:C.greenDim,color:u.is_active?C.red:C.green,border:`1px solid ${u.is_active?C.red:C.green}33`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+                            {toggling===u.id?"...":(u.is_active?"إيقاف":"تفعيل")}
+                          </button>
+                        </td>
+                      </TRow>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {!loading && clientUsers.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>لا يوجد عملاء بعد</div>}
+          </div>
+        </div>
+      )}
+
+      {/* ── Sub-Users Tab ── */}
+      {activeTab === "subusers" && (
+        <div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ fontSize:16,fontWeight:700,color:C.text }}>موظفو الشركات (Sub-Users)</div>
+            <Btn onClick={()=>setShowSubAdd(true)}><Ic d={I.userPlus} s={14} />إضافة موظف</Btn>
+          </div>
+          <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden" }}>
+            {subLoading ? <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>جاري التحميل...</div> : (
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["اسم المستخدم","الاسم","الشركة","الدور","الصلاحيات","الصفحات","الحالة","التحكم"]} />
+                <tbody>
+                  {subUsers.map((su,i)=>{
+                    const ownerProfile = users.find(u=>u.id===su.owner_id);
+                    const pagesCount = (su.allowed_pages||[]).length;
+                    return (
+                      <TRow key={su.id} alt={i%2}>
+                        <TD><span style={{ fontFamily:"monospace",fontWeight:700,color:C.accent }}>{su.username}</span></TD>
+                        <TD>{su.display_name||"—"}</TD>
+                        <TD color={C.textDim}>{ownerProfile?.company_name||ownerProfile?.email||"—"}</TD>
+                        <TD><span style={{ background:C.purpleDim,color:C.purple,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>{su.role}</span></TD>
+                        <td style={{ padding:"11px 14px" }}>
+                          <div style={{ display:"flex",gap:4,flexWrap:"wrap" }}>
+                            {su.can_add && <span style={{ background:C.greenDim,color:C.green,fontSize:10,padding:"2px 7px",borderRadius:20,fontWeight:700 }}>إضافة</span>}
+                            {su.can_edit && <span style={{ background:C.blueDim,color:C.blue,fontSize:10,padding:"2px 7px",borderRadius:20,fontWeight:700 }}>تعديل</span>}
+                            {su.can_delete && <span style={{ background:C.redDim,color:C.red,fontSize:10,padding:"2px 7px",borderRadius:20,fontWeight:700 }}>حذف</span>}
+                            {!su.can_add&&!su.can_edit&&!su.can_delete && <span style={{ background:C.surface2,color:C.textMuted,fontSize:10,padding:"2px 7px",borderRadius:20,fontWeight:700 }}>مشاهدة فقط</span>}
+                          </div>
+                        </td>
+                        <TD color={C.textMuted}><span style={{ fontSize:11 }}>{pagesCount} صفحة</span></TD>
+                        <td style={{ padding:"11px 14px" }}><Badge label={su.is_active?"مدفوعة":"غير مدفوعة"} /></td>
+                        <td style={{ padding:"11px 14px" }}>
+                          <div style={{ display:"flex",gap:6 }}>
+                            <button onClick={()=>toggleSubUser(su)} disabled={togglingSubId===su.id}
+                              style={{ background:su.is_active?C.yellowDim:C.greenDim,color:su.is_active?C.yellow:C.green,border:`1px solid ${su.is_active?C.yellow:C.green}33`,borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+                              {togglingSubId===su.id?"...":(su.is_active?"تعطيل":"تفعيل")}
+                            </button>
+                            <button onClick={()=>deleteSubUser(su.id)} style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer" }}>
+                              <Ic d={I.trash} s={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </TRow>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {!subLoading && subUsers.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>لا يوجد موظفون مضافون بعد</div>}
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Company Modal ── */}
       {showAdd && (
-        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000 }}>
-          <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:20,padding:28,width:"min(440px,92vw)",display:"flex",flexDirection:"column",gap:16 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-              <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>إضافة عميل جديد</h2>
-              <button onClick={()=>setShowAdd(false)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6 }}><Ic d={I.close} s={16} /></button>
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000 }}>
+          <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:22,padding:32,width:"min(460px,92vw)",display:"flex",flexDirection:"column",gap:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+              <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>🏢 إضافة شركة عميل جديدة</h2>
+              <button onClick={()=>setShowAdd(false)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
             </div>
-            <Inp label="البريد الإلكتروني *" value={newUser.email} onChange={v=>setNewUser({...newUser,email:v})} type="email" placeholder="client@company.com" />
-            <Inp label="كلمة المرور * (6 أحرف على الأقل)" value={newUser.password} onChange={v=>setNewUser({...newUser,password:v})} placeholder="اكتبها واحفظها" />
-            <Inp label="اسم الشركة (اختياري)" value={newUser.company} onChange={v=>setNewUser({...newUser,company:v})} placeholder="شركة النور للتجارة" />
-            <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.yellow }}>⚠️ احفظ كلمة المرور — مش هتقدر تشوفها تاني بعد الإنشاء</div>
-            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+            <Inp label="البريد الإلكتروني *" value={newUser.email} onChange={v=>setNewUser({...newUser,email:v})} type="email" placeholder="company@example.com" />
+            <Inp label="كلمة المرور * (6 أحرف على الأقل)" value={newUser.password} onChange={v=>setNewUser({...newUser,password:v})} placeholder="اكتبها واحفظها جيداً" />
+            <Inp label="اسم الشركة" value={newUser.company} onChange={v=>setNewUser({...newUser,company:v})} placeholder="شركة النور للتجارة" />
+            <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:10,padding:"11px 14px",fontSize:12,color:C.yellow,lineHeight:1.7 }}>
+              ⚠️ سيتم إرسال إيميل تأكيد للعميل — احفظ كلمة المرور لأنك لن تراها مرة أخرى
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:4 }}>
               <Btn variant="ghost" onClick={()=>setShowAdd(false)}>إلغاء</Btn>
-              <Btn onClick={addUser}>{adding?"جاري الإضافة...":"إضافة العميل"}</Btn>
+              <Btn onClick={addUser}>{adding?"جاري الإضافة...":"إضافة الشركة"}</Btn>
             </div>
           </div>
         </div>
       )}
+
+      {/* ── Add Sub-User Modal ── */}
+      {showSubAdd && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16 }}>
+          <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:22,padding:32,width:"min(640px,95vw)",maxHeight:"90vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:18 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>👤 إضافة موظف جديد</h2>
+              <button onClick={()=>setShowSubAdd(false)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
+            </div>
+
+            {/* Owner select */}
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>الشركة التابع لها الموظف *</label>
+              <select value={selectedOwner} onChange={e=>setSelectedOwner(e.target.value)}
+                style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}>
+                <option value="">-- اختر الشركة --</option>
+                {clientUsers.map(u=><option key={u.id} value={u.id}>{u.company_name||u.email}</option>)}
+              </select>
+            </div>
+
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Inp label="اسم المستخدم (Username) *" value={subForm.username} onChange={v=>setSubForm({...subForm,username:v.replace(/\s/g,"_")})} placeholder="ahmed_sales" />
+              <Inp label="الاسم الظاهر" value={subForm.display_name} onChange={v=>setSubForm({...subForm,display_name:v})} placeholder="أحمد محمود" />
+              <Inp label="كلمة المرور *" value={subForm.password} onChange={v=>setSubForm({...subForm,password:v})} placeholder="123456" />
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>الدور</label>
+                <select value={subForm.role} onChange={e=>{
+                  const role = e.target.value;
+                  const perms = ROLE_PRESETS[role];
+                  setSubForm(prev=>({...prev, role, can_add:perms.canAdd, can_delete:perms.canDelete, can_edit:perms.canEdit}));
+                }} style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}>
+                  {Object.keys(ROLE_PRESETS).map(r=><option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Role permissions preview */}
+            <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 18px" }}>
+              <div style={{ fontSize:12,fontWeight:700,color:C.textDim,marginBottom:10 }}>الصلاحيات المحددة للدور:</div>
+              <div style={{ display:"flex",gap:10 }}>
+                {[
+                  {label:"إضافة",active:ROLE_PRESETS[subForm.role]?.canAdd,color:C.green},
+                  {label:"تعديل",active:ROLE_PRESETS[subForm.role]?.canEdit,color:C.blue},
+                  {label:"حذف",active:ROLE_PRESETS[subForm.role]?.canDelete,color:C.red},
+                ].map(p=>(
+                  <div key={p.label} style={{ display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:20,background:p.active?p.color+"18":C.surface3,border:`1px solid ${p.active?p.color+"44":C.border}` }}>
+                    <div style={{ width:6,height:6,borderRadius:"50%",background:p.active?p.color:C.textMuted }} />
+                    <span style={{ fontSize:12,fontWeight:700,color:p.active?p.color:C.textMuted }}>{p.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Allowed pages */}
+            <div>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>الصفحات المسموح بها ({subForm.allowed_pages.length} من {ALL_PAGES.length})</label>
+                <div style={{ display:"flex",gap:8 }}>
+                  <button onClick={()=>setSubForm(p=>({...p,allowed_pages:ALL_PAGES.map(x=>x.id)}))} style={{ background:C.greenDim,color:C.green,border:`1px solid ${C.green}33`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>تحديد الكل</button>
+                  <button onClick={()=>setSubForm(p=>({...p,allowed_pages:[]}))} style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>إلغاء الكل</button>
+                </div>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8 }}>
+                {ALL_PAGES.map(pg=>{
+                  const checked = subForm.allowed_pages.includes(pg.id);
+                  return (
+                    <label key={pg.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:10,background:checked?C.accentDim:C.surface2,border:`1px solid ${checked?C.accent+"44":C.border}`,cursor:"pointer",transition:"all 0.15s" }}>
+                      <input type="checkbox" checked={checked} onChange={e=>setSubForm(prev=>({
+                        ...prev,
+                        allowed_pages: e.target.checked ? [...prev.allowed_pages,pg.id] : prev.allowed_pages.filter(x=>x!==pg.id)
+                      }))} style={{ accentColor:C.accent,width:14,height:14 }} />
+                      <span style={{ fontSize:12,fontWeight:600,color:checked?C.accent:C.textMuted }}>{pg.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:10,padding:"11px 14px",fontSize:12,color:C.yellow,lineHeight:1.7 }}>
+              💡 الموظف سيدخل من شاشة تسجيل الدخول باختيار "دخول موظف" ثم يدخل اليوزرنيم والباسورد
+            </div>
+
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowSubAdd(false)}>إلغاء</Btn>
+              <Btn onClick={addSubUser}>{addingSub?"جاري الإضافة...":"إضافة الموظف"}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LIVE CLOCK ───────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const dateStr = now.toLocaleDateString("ar-EG", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+  const timeStr = now.toLocaleTimeString("ar-EG", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+  return (
+    <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 18px",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2 }}>
+      <div style={{ fontSize:13,color:C.textDim,fontWeight:600 }}>{dateStr}</div>
+      <div style={{ fontSize:16,color:C.accent,fontWeight:800,fontFamily:"monospace",letterSpacing:1 }}>{timeStr}</div>
     </div>
   );
 }
@@ -895,9 +1293,7 @@ function Dashboard({ data }) {
           <h1 style={{ margin:0,fontSize:24,fontWeight:800,color:C.text,letterSpacing:-0.5 }}>لوحة التحكم</h1>
           <p style={{ margin:"5px 0 0",color:C.textMuted,fontSize:13 }}>نظرة عامة شاملة على الأداء المالي</p>
         </div>
-        <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 18px",fontSize:13,color:C.textDim,fontWeight:600 }}>
-          {new Date().toLocaleDateString("ar-EG",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}
-        </div>
+        <LiveClock />
       </div>
       <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14 }}>
         {bigStats.map(s=>(
@@ -986,12 +1382,12 @@ function Dashboard({ data }) {
 // ─── INVOICE FORM ─────────────────────────────────────────────────────────────
 function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose }) {
   const isS = type==="sales";
-  const [form, setForm] = useState({ date:today(),party:"",paid:"",taxRate:"14",notes:"" });
+  const [form, setForm] = useState({ date:today(),party:"",paid:"",taxRate:"14",paymentMethod:"نقدي",checkNumber:"",checkDate:"",notes:"" });
   const [items, setItems] = useState([{ category:"",name:"",qty:1,price:0 }]);
   const partyList = isS ? clients : suppliers;
 
   const subtotal = items.reduce((s,it)=>s+(parseFloat(it.qty)||0)*(parseFloat(it.price)||0),0);
-  const taxAmount = subtotal*(parseFloat(form.taxRate)||0)/100;
+  const taxAmount = isS ? subtotal*(parseFloat(form.taxRate)||0)/100 : 0;
   const total = subtotal+taxAmount;
   const paid = parseFloat(form.paid)||0;
 
@@ -1009,6 +1405,9 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose }) 
       taxRate:parseFloat(form.taxRate)||0,
       subtotal:Math.round(subtotal),
       taxAmount:Math.round(taxAmount),
+      paymentMethod:form.paymentMethod,
+      checkNumber:form.checkNumber,
+      checkDate:form.checkDate,
       notes:form.notes,
       status:paid>=total?"مدفوعة":paid>0?"جزئية":"غير مدفوعة",
     });
@@ -1019,8 +1418,11 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose }) 
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
         <Inp label="التاريخ" type="date" value={form.date} onChange={v=>setForm({...form,date:v})} />
         <Sel label={isS?"العميل":"المورد"} value={form.party} onChange={v=>setForm({...form,party:v})} options={partyList.map(p=>({value:p.name,label:p.name}))} />
-        <Inp label="نسبة الضريبة %" type="number" value={form.taxRate} onChange={v=>setForm({...form,taxRate:v})} placeholder="14" />
+        {isS && <Inp label="نسبة الضريبة %" type="number" value={form.taxRate} onChange={v=>setForm({...form,taxRate:v})} placeholder="14" />}
         <Inp label={isS?"المدفوع مقدماً":"المدفوع"} type="number" value={form.paid} onChange={v=>setForm({...form,paid:v})} placeholder="0" />
+        <Sel label="طريقة الدفع" value={form.paymentMethod} onChange={v=>setForm({...form,paymentMethod:v})} options={[{value:"نقدي",label:"💵 نقدي"},{value:"شيك",label:"📄 شيك"},{value:"تحويل",label:"🏦 تحويل بنكي"}]} />
+        {form.paymentMethod==="شيك" && <Inp label="رقم الشيك" value={form.checkNumber} onChange={v=>setForm({...form,checkNumber:v})} placeholder="رقم الشيك..." />}
+        {form.paymentMethod==="شيك" && <Inp label="تاريخ الشيك" type="date" value={form.checkDate} onChange={v=>setForm({...form,checkDate:v})} />}
       </div>
       <div>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
@@ -1064,12 +1466,12 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose }) 
       </div>
       <div style={{ background:C.surface3,borderRadius:12,padding:"14px 18px",display:"flex",flexDirection:"column",gap:8 }}>
         {[
-          { label:"المجموع قبل الضريبة",val:fmt(subtotal),color:C.text },
-          { label:`ضريبة ${form.taxRate}%`,val:fmt(taxAmount),color:C.yellow },
-          { label:"الإجمالي الكلي",val:fmt(total),color:C.accent,bold:true },
-          { label:"المدفوع",val:fmt(paid),color:C.green },
-          { label:"المتبقي",val:fmt(total-paid),color:total-paid>0?C.red:C.green },
-        ].map(r=>(
+          { label:"المجموع",val:fmt(subtotal),color:C.text,show:true },
+          { label:`ضريبة ${form.taxRate}%`,val:fmt(taxAmount),color:C.yellow,show:isS },
+          { label:"الإجمالي الكلي",val:fmt(total),color:C.accent,bold:true,show:true },
+          { label:"المدفوع",val:fmt(paid),color:C.green,show:true },
+          { label:"المتبقي",val:fmt(total-paid),color:total-paid>0?C.red:C.green,show:true },
+        ].filter(r=>r.show).map(r=>(
           <div key={r.label} style={{ display:"flex",justifyContent:"space-between",fontSize:r.bold?14:12,borderTop:r.bold?`1px solid ${C.border}`:"none",paddingTop:r.bold?8:0 }}>
             <span style={{ color:C.textMuted,fontWeight:r.bold?700:400 }}>{r.label}</span>
             <span style={{ color:r.color,fontWeight:700,fontFamily:"monospace" }}>{r.val}</span>
@@ -1133,7 +1535,7 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
         </div>
         <div style={{ overflowX:"auto" }}>
           <table style={{ width:"100%",borderCollapse:"collapse" }}>
-            <THead cols={["رقم الفاتورة","التاريخ",type==="sales"?"العميل":"المورد","الأصناف","قبل الضريبة","الضريبة","الإجمالي",type==="sales"?"المدفوع":"المدفوع","المتبقي","الحالة","طباعة",""]} />
+            <THead cols={["رقم الفاتورة","التاريخ",type==="sales"?"العميل":"المورد","الأصناف","الإجمالي","المدفوع","المتبقي","طريقة الدفع","الحالة","طباعة",""]} />
             <tbody>
               {filtered.map((inv,idx)=>{
                 const party = type==="sales"?inv.client:inv.supplier;
@@ -1142,14 +1544,18 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
                 return (
                   <TRow key={inv.id} alt={idx%2}>
                     <TD color={C.accent}><span style={{ fontWeight:700 }}>{inv.id}</span></TD>
-                    <TD color={C.textDim}>{inv.date}</TD>
+                    <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(inv.createdAt||inv.date)}</span></TD>
                     <TD><span style={{ fontWeight:600 }}>{party}</span></TD>
                     <TD color={C.textMuted}><span style={{ fontSize:11 }}>{itemNames||"—"}</span></TD>
-                    <TD mono color={C.textDim}>{fmt(inv.subtotal||inv.amount)}</TD>
-                    <TD mono color={C.yellow}>{fmt(inv.taxAmount||0)}</TD>
                     <TD mono><span style={{ fontWeight:700 }}>{fmt(inv.amount)}</span></TD>
                     <TD mono color={C.green}>{fmt(inv.paid)}</TD>
                     <TD mono color={remaining>0?C.red:C.textMuted}>{fmt(remaining)}</TD>
+                    <td style={{ padding:"11px 14px" }}>
+                      <span style={{ fontSize:11,color:inv.paymentMethod==="شيك"?C.yellow:inv.paymentMethod==="تحويل"?C.blue:C.green,fontWeight:600 }}>
+                        {inv.paymentMethod==="شيك"?"📄 شيك":inv.paymentMethod==="تحويل"?"🏦 تحويل":"💵 نقدي"}
+                        {inv.paymentMethod==="شيك"&&inv.checkNumber?` #${inv.checkNumber}`:""}
+                      </span>
+                    </td>
                     <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
                     <td style={{ padding:"11px 14px" }}>
                       <button onClick={()=>printInvoice(inv,type)} title="طباعة" style={{ background:"none",border:"none",cursor:"pointer",color:C.blue }}><Ic d={I.print} s={14} /></button>
@@ -1291,465 +1697,607 @@ function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty }
   );
 }
 
-// ─── REPORTS PAGE ─────────────────────────────────────────────────────────────
-function ReportsPage({ data, userEmail }) {
-  const [period, setPeriod] = useState("monthly");
+
+// ─── UNIFIED REPORTS PAGE (يومي + شهري مدمج + أرشيف شهري) ─────────────────────
+function generateDayReportHTML(dayData, date) {
+  const { sales, purchases, returns, expenses } = dayData;
+  const totalSales = sales.reduce((s,i)=>s+i.amount,0);
+  const totalPurchases = purchases.reduce((s,i)=>s+i.amount,0);
+  const totalReturns = returns.reduce((s,i)=>s+i.amount,0);
+  const totalExpenses = expenses.reduce((s,e)=>s+e.amount,0);
+  const netProfit = totalSales - totalPurchases - totalReturns - totalExpenses;
+  const paid = sales.reduce((s,i)=>s+i.paid,0);
+  const unpaid = totalSales - paid;
+  const dateLabel = new Date(date+"T00:00:00").toLocaleDateString("ar-EG",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+  return `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>تقرير يوم ${date}</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Cairo','Segoe UI',sans-serif;background:#fff;color:#1a1a2e;padding:36px 40px}
+  .header{text-align:center;padding-bottom:18px;border-bottom:3px solid #6c7fff;margin-bottom:24px}
+  .logo{font-size:26px;font-weight:900;color:#6c7fff}.sub{font-size:13px;color:#64748b;margin-top:4px}
+  .stamp{background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:6px 18px;display:inline-block;margin-top:10px;font-size:12px;color:#4f46e5;font-weight:700}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+  .stat{border-radius:10px;padding:14px 16px;border:1px solid #e2e8f0;text-align:center}
+  .stat-v{font-size:17px;font-weight:800;font-family:monospace}.stat-l{font-size:10px;color:#64748b;margin-top:3px}
+  .sec{font-size:14px;font-weight:800;margin:20px 0 10px;color:#1e293b;border-right:4px solid #6c7fff;padding-right:10px}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px}
+  thead tr{background:#6c7fff;color:#fff}thead th{padding:8px 10px;font-weight:700;text-align:right}
+  tbody tr:nth-child(even){background:#f8faff}tbody td{padding:8px 10px;border-bottom:1px solid #e2e8f0}
+  .footer{margin-top:28px;text-align:center;font-size:10px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
+  .locked{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 14px;font-size:11px;color:#92400e;margin-top:10px;text-align:center}
+  @media print{body{padding:16px}}</style></head><body>
+  <div class="header">
+    <div class="logo">حسابي Pro</div>
+    <div class="sub">تقرير يومي مُغلق</div>
+    <div class="stamp">📅 ${dateLabel}</div>
+    <div class="locked">🔒 تم إغلاق هذا التقرير بتاريخ ${new Date().toLocaleString("ar-EG")} — غير قابل للتعديل</div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-v" style="color:#34d399">${totalSales.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">إجمالي المبيعات</div></div>
+    <div class="stat"><div class="stat-v" style="color:#f87171">${totalPurchases.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">إجمالي المشتريات</div></div>
+    <div class="stat"><div class="stat-v" style="color:${netProfit>=0?"#34d399":"#f87171"}">${netProfit.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">صافي الربح</div></div>
+    <div class="stat"><div class="stat-v" style="color:#6c7fff">${paid.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">المحصّل</div></div>
+    <div class="stat"><div class="stat-v" style="color:#f59e0b">${unpaid.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">غير محصّل</div></div>
+    <div class="stat"><div class="stat-v" style="color:#a78bfa">${totalReturns.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">المرتجعات</div></div>
+  </div>
+  ${sales.length>0?`<div class="sec">فواتير المبيعات (${sales.length})</div>
+  <table><thead><tr><th>#</th><th>الوقت</th><th>العميل</th><th>الأصناف</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>طريقة الدفع</th><th>الحالة</th></tr></thead><tbody>
+  ${sales.map(i=>`<tr><td>${i.id}</td><td>${fmtDateTime(i.createdAt||i.date)}</td><td>${i.client||"—"}</td><td style="font-size:10px">${(i.items||[]).map(x=>x.name).join("، ")||"—"}</td><td>${i.amount.toLocaleString("ar-EG")} ج.م</td><td>${i.paid.toLocaleString("ar-EG")} ج.م</td><td>${(i.amount-i.paid).toLocaleString("ar-EG")} ج.م</td><td>${i.paymentMethod||"نقدي"}</td><td>${i.status}</td></tr>`).join("")}
+  </tbody></table>`:""}
+  ${purchases.length>0?`<div class="sec">فواتير المشتريات (${purchases.length})</div>
+  <table><thead><tr><th>#</th><th>الوقت</th><th>المورد</th><th>الإجمالي</th><th>المدفوع</th><th>طريقة الدفع</th><th>الحالة</th></tr></thead><tbody>
+  ${purchases.map(i=>`<tr><td>${i.id}</td><td>${fmtDateTime(i.createdAt||i.date)}</td><td>${i.supplier||"—"}</td><td>${i.amount.toLocaleString("ar-EG")} ج.م</td><td>${i.paid.toLocaleString("ar-EG")} ج.م</td><td>${i.paymentMethod||"نقدي"}</td><td>${i.status}</td></tr>`).join("")}
+  </tbody></table>`:""}
+  ${returns.length>0?`<div class="sec">المرتجعات (${returns.length})</div>
+  <table><thead><tr><th>#</th><th>الوقت</th><th>الطرف</th><th>المبلغ</th><th>السبب</th></tr></thead><tbody>
+  ${returns.map(r=>`<tr><td>${r.id}</td><td>${fmtDateTime(r.createdAt||r.date)}</td><td>${r.party||"—"}</td><td>${r.amount.toLocaleString("ar-EG")} ج.م</td><td>${r.reason||"—"}</td></tr>`).join("")}
+  </tbody></table>`:""}
+  ${expenses.length>0?`<div class="sec">المصروفات (${expenses.length})</div>
+  <table><thead><tr><th>#</th><th>الوقت</th><th>الوصف</th><th>الفئة</th><th>المبلغ</th><th>طريقة الدفع</th></tr></thead><tbody>
+  ${expenses.map(e=>`<tr><td>${e.id}</td><td>${fmtDateTime(e.createdAt||e.date)}</td><td>${e.description||"—"}</td><td>${e.category||"—"}</td><td>${e.amount.toLocaleString("ar-EG")} ج.م</td><td>${e.paymentMethod||"نقدي"}</td></tr>`).join("")}
+  </tbody></table>`:""}
+  <div class="footer">تقرير يومي — حسابي Pro — أُنشئ بتاريخ ${new Date().toLocaleString("ar-EG")}</div>
+  </body></html>`;
+}
+
+function generateMonthReportHTML(monthData, month, data) {
+  const { sales, purchases, returns, expenses } = monthData;
+  const totalSales = sales.reduce((s,i)=>s+i.amount,0);
+  const totalPurchases = purchases.reduce((s,i)=>s+i.amount,0);
+  const totalReturns = returns.reduce((s,r)=>s+r.amount,0);
+  const totalExpenses = expenses.reduce((s,e)=>s+e.amount,0);
+  const totalTax = sales.reduce((s,i)=>s+(i.taxAmount||0),0);
+  const netProfit = totalSales - totalPurchases - totalReturns - totalExpenses;
+  const catSales = {};
+  sales.forEach(inv=>{ (inv.items||[]).forEach(it=>{ const c=it.category||"غير محدد"; catSales[c]=(catSales[c]||0)+it.qty*it.price; }); });
+  const [y,m] = month.split("-");
+  const monthLabel = new Date(+y, +m-1, 1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"});
+  return `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>تقرير شهر ${month}</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Cairo','Segoe UI',sans-serif;background:#fff;color:#1a1a2e;padding:36px 40px}
+  .header{text-align:center;padding-bottom:18px;border-bottom:3px solid #6c7fff;margin-bottom:24px}
+  .logo{font-size:26px;font-weight:900;color:#6c7fff}.sub{font-size:13px;color:#64748b;margin-top:4px}
+  .stamp{background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:6px 18px;display:inline-block;margin-top:10px;font-size:12px;color:#4f46e5;font-weight:700}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+  .stat{border-radius:10px;padding:14px 16px;border:1px solid #e2e8f0;text-align:center}
+  .stat-v{font-size:17px;font-weight:800;font-family:monospace}.stat-l{font-size:10px;color:#64748b;margin-top:3px}
+  .sec{font-size:14px;font-weight:800;margin:20px 0 10px;color:#1e293b;border-right:4px solid #6c7fff;padding-right:10px}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:11px}
+  thead tr{background:#6c7fff;color:#fff}thead th{padding:8px 10px;font-weight:700;text-align:right}
+  tbody tr:nth-child(even){background:#f8faff}tbody td{padding:8px 10px;border-bottom:1px solid #e2e8f0}
+  .locked{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 14px;font-size:11px;color:#92400e;margin-top:10px;text-align:center}
+  .footer{margin-top:28px;text-align:center;font-size:10px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
+  @media print{body{padding:16px}}</style></head><body>
+  <div class="header">
+    <div class="logo">حسابي Pro</div><div class="sub">تقرير شهري مُغلق</div>
+    <div class="stamp">📅 ${monthLabel}</div>
+    <div class="locked">🔒 تم إغلاق هذا التقرير تلقائياً في بداية الشهر — غير قابل للتعديل</div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-v" style="color:#34d399">${totalSales.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">المبيعات</div></div>
+    <div class="stat"><div class="stat-v" style="color:#f87171">${totalPurchases.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">المشتريات</div></div>
+    <div class="stat"><div class="stat-v" style="color:${netProfit>=0?"#34d399":"#f87171"}">${netProfit.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">صافي الربح</div></div>
+    <div class="stat"><div class="stat-v" style="color:#f59e0b">${totalTax.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">إجمالي الضرائب</div></div>
+    <div class="stat"><div class="stat-v" style="color:#a78bfa">${totalReturns.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">المرتجعات</div></div>
+    <div class="stat"><div class="stat-v" style="color:#f87171">${totalExpenses.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">المصروفات</div></div>
+    <div class="stat"><div class="stat-v" style="color:#6c7fff">${sales.length}</div><div class="stat-l">فواتير مبيعات</div></div>
+    <div class="stat"><div class="stat-v" style="color:#60a5fa">${purchases.length}</div><div class="stat-l">فواتير مشتريات</div></div>
+  </div>
+  ${Object.keys(catSales).length>0?`<div class="sec">المبيعات حسب الفئة</div>
+  <table><thead><tr><th>الفئة</th><th>القيمة</th></tr></thead><tbody>
+  ${Object.entries(catSales).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<tr><td>${c}</td><td>${v.toLocaleString("ar-EG")} ج.م</td></tr>`).join("")}
+  </tbody></table>`:""}
+  <div class="sec">كافة فواتير المبيعات (${sales.length})</div>
+  <table><thead><tr><th>#</th><th>التاريخ والوقت</th><th>العميل</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>طريقة الدفع</th><th>الحالة</th></tr></thead><tbody>
+  ${sales.map(i=>`<tr><td>${i.id}</td><td>${fmtDateTime(i.createdAt||i.date)}</td><td>${i.client||"—"}</td><td>${i.amount.toLocaleString("ar-EG")} ج.م</td><td>${i.paid.toLocaleString("ar-EG")} ج.م</td><td>${(i.amount-i.paid).toLocaleString("ar-EG")} ج.م</td><td>${i.paymentMethod||"نقدي"}</td><td>${i.status}</td></tr>`).join("")}
+  </tbody></table>
+  <div class="sec">كافة فواتير المشتريات (${purchases.length})</div>
+  <table><thead><tr><th>#</th><th>التاريخ والوقت</th><th>المورد</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
+  ${purchases.map(i=>`<tr><td>${i.id}</td><td>${fmtDateTime(i.createdAt||i.date)}</td><td>${i.supplier||"—"}</td><td>${i.amount.toLocaleString("ar-EG")} ج.م</td><td>${i.paid.toLocaleString("ar-EG")} ج.م</td><td>${(i.amount-i.paid).toLocaleString("ar-EG")} ج.م</td><td>${i.status}</td></tr>`).join("")}
+  </tbody></table>
+  ${returns.length>0?`<div class="sec">المرتجعات (${returns.length})</div>
+  <table><thead><tr><th>#</th><th>التاريخ والوقت</th><th>الطرف</th><th>المبلغ</th><th>السبب</th></tr></thead><tbody>
+  ${returns.map(r=>`<tr><td>${r.id}</td><td>${fmtDateTime(r.createdAt||r.date)}</td><td>${r.party||"—"}</td><td>${r.amount.toLocaleString("ar-EG")} ج.م</td><td>${r.reason||"—"}</td></tr>`).join("")}
+  </tbody></table>`:""}
+  ${expenses.length>0?`<div class="sec">المصروفات (${expenses.length})</div>
+  <table><thead><tr><th>#</th><th>التاريخ والوقت</th><th>الوصف</th><th>الفئة</th><th>المبلغ</th></tr></thead><tbody>
+  ${expenses.map(e=>`<tr><td>${e.id}</td><td>${fmtDateTime(e.createdAt||e.date)}</td><td>${e.description||"—"}</td><td>${e.category||"—"}</td><td>${e.amount.toLocaleString("ar-EG")} ج.م</td></tr>`).join("")}
+  </tbody></table>`:""}
+  <div class="footer">تقرير شهري — حسابي Pro — أُنشئ بتاريخ ${new Date().toLocaleString("ar-EG")}</div>
+  </body></html>`;
+}
+
+function UnifiedReportsPage({ data, userEmail }) {
+  const [viewMode, setViewMode] = useState("daily"); // daily | monthly | archive
+  const [selectedDate, setSelectedDate] = useState(today());
   const [selectedMonth, setSelectedMonth] = useState(today().slice(0,7));
   const [pwdDialog, setPwdDialog] = useState(null);
+  const [confirmClose, setConfirmClose] = useState(false);
 
-  const allInvoices = [...data.salesInvoices,...data.purchaseInvoices];
-  const months = [...new Set(allInvoices.map(i=>getMonth(i.date)))].sort().reverse();
+  // Archived daily reports stored in localStorage
+  const [dailyArchive, setDailyArchive] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("daily_reports_archive")||"[]"); } catch { return []; }
+  });
+  const [monthlyArchive, setMonthlyArchive] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("monthly_reports_archive")||"[]"); } catch { return []; }
+  });
 
-  const salesByMonth = useMemo(()=>{
-    const map={};
-    data.salesInvoices.forEach(i=>{ const m=getMonth(i.date); if(!map[m])map[m]={sales:0,purchases:0,paid:0,unpaid:0,count:0}; map[m].sales+=i.amount; map[m].paid+=i.paid; map[m].unpaid+=(i.amount-i.paid); map[m].count++; });
-    data.purchaseInvoices.forEach(i=>{ const m=getMonth(i.date); if(!map[m])map[m]={sales:0,purchases:0,paid:0,unpaid:0,count:0}; map[m].purchases+=i.amount; });
-    return map;
-  },[data]);
+  // Expenses from localStorage
+  const expenses = (() => { try { return JSON.parse(localStorage.getItem("expenses_local")||"[]"); } catch { return []; } })();
 
-  const monthData = salesByMonth[selectedMonth]||{ sales:0,purchases:0,paid:0,unpaid:0,count:0 };
-  const profit = monthData.sales-monthData.purchases;
-  const filteredSales = data.salesInvoices.filter(i=>getMonth(i.date)===selectedMonth);
-  const filteredPurchases = data.purchaseInvoices.filter(i=>getMonth(i.date)===selectedMonth);
+  // Auto-close month at midnight on 1st of each month
+  useEffect(() => {
+    const checkAutoClose = () => {
+      const now = new Date();
+      if (now.getDate() === 1 && now.getHours() === 0 && now.getMinutes() === 0) {
+        const prevMonth = new Date(now.getFullYear(), now.getMonth()-1, 1);
+        const m = prevMonth.toISOString().slice(0,7);
+        if (!monthlyArchive.find(r=>r.month===m)) {
+          autoCloseMonth(m);
+        }
+      }
+    };
+    const interval = setInterval(checkAutoClose, 60000);
+    checkAutoClose();
+    return () => clearInterval(interval);
+  }, [monthlyArchive]);
 
-  const catSales={};
-  filteredSales.forEach(inv=>{ (inv.items||[]).forEach(it=>{ const c=it.category||"غير محدد"; catSales[c]=(catSales[c]||0)+it.qty*it.price; }); });
-
-  const handlePrint = () => {
-    setPwdDialog({ onConfirm: () => { setPwdDialog(null); printFinancialReport(data,period,selectedMonth); } });
+  const autoCloseMonth = (month) => {
+    const sales = data.salesInvoices.filter(i=>getMonth(i.date)===month);
+    const purchases = data.purchaseInvoices.filter(i=>getMonth(i.date)===month);
+    const returns = data.returns.filter(r=>getMonth(r.date)===month);
+    const expMonthly = expenses.filter(e=>e.date?.startsWith(month));
+    const report = {
+      month, closedAt: new Date().toISOString(), auto: true,
+      totalSales: sales.reduce((s,i)=>s+i.amount,0),
+      totalPurchases: purchases.reduce((s,i)=>s+i.amount,0),
+      totalReturns: returns.reduce((s,r)=>s+r.amount,0),
+      totalExpenses: expMonthly.reduce((s,e)=>s+e.amount,0),
+      totalTax: sales.reduce((s,i)=>s+(i.taxAmount||0),0),
+      salesCount: sales.length, purchasesCount: purchases.length,
+      htmlContent: generateMonthReportHTML({sales,purchases,returns,expenses:expMonthly}, month, data),
+    };
+    report.netProfit = report.totalSales - report.totalPurchases - report.totalReturns - report.totalExpenses;
+    const updated = [...monthlyArchive.filter(r=>r.month!==month), report];
+    setMonthlyArchive(updated);
+    localStorage.setItem("monthly_reports_archive", JSON.stringify(updated));
   };
+
+  // Close today's report manually
+  const closeDayReport = () => {
+    const sales = data.salesInvoices.filter(i=>i.date===selectedDate);
+    const purchases = data.purchaseInvoices.filter(i=>i.date===selectedDate);
+    const returns = data.returns.filter(r=>r.date===selectedDate);
+    const dayExpenses = expenses.filter(e=>e.date===selectedDate);
+    const html = generateDayReportHTML({sales,purchases,returns,expenses:dayExpenses}, selectedDate);
+    const report = {
+      date: selectedDate, closedAt: new Date().toISOString(),
+      totalSales: sales.reduce((s,i)=>s+i.amount,0),
+      totalPurchases: purchases.reduce((s,i)=>s+i.amount,0),
+      totalReturns: returns.reduce((s,r)=>s+r.amount,0),
+      totalExpenses: dayExpenses.reduce((s,e)=>s+e.amount,0),
+      salesCount: sales.length, purchasesCount: purchases.length,
+      htmlContent: html,
+    };
+    report.netProfit = report.totalSales - report.totalPurchases - report.totalReturns - report.totalExpenses;
+    const updated = [...dailyArchive.filter(r=>r.date!==selectedDate), report];
+    setDailyArchive(updated);
+    localStorage.setItem("daily_reports_archive", JSON.stringify(updated));
+    // Download PDF via print
+    const w = window.open("","_blank");
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(()=>w.print(),500);
+    setConfirmClose(false);
+  };
+
+  // Close month manually
+  const closeMonthManual = () => {
+    setPwdDialog({ onConfirm: () => {
+      setPwdDialog(null);
+      autoCloseMonth(selectedMonth);
+    }});
+  };
+
+  // Download archived report
+  const downloadArchive = (html, filename) => {
+    const w = window.open("","_blank");
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(()=>w.print(),500);
+  };
+
+  // Data for selected date (daily view)
+  const daySales = data.salesInvoices.filter(i=>i.date===selectedDate);
+  const dayPurchases = data.purchaseInvoices.filter(i=>i.date===selectedDate);
+  const dayReturns = data.returns.filter(r=>r.date===selectedDate);
+  const dayExpenses = expenses.filter(e=>e.date===selectedDate);
+
+  const dayTotalSales = daySales.reduce((s,i)=>s+i.amount,0);
+  const dayTotalPurchases = dayPurchases.reduce((s,i)=>s+i.amount,0);
+  const dayTotalReturns = dayReturns.reduce((s,r)=>s+r.amount,0);
+  const dayTotalExpenses = dayExpenses.reduce((s,e)=>s+e.amount,0);
+  const dayNetProfit = dayTotalSales - dayTotalPurchases - dayTotalReturns - dayTotalExpenses;
+  const dayPaid = daySales.reduce((s,i)=>s+i.paid,0);
+  const dayUnpaid = dayTotalSales - dayPaid;
+  const isDayClosed = dailyArchive.some(r=>r.date===selectedDate);
+
+  // Data for selected month (monthly view)
+  const monthSales = data.salesInvoices.filter(i=>getMonth(i.date)===selectedMonth);
+  const monthPurchases = data.purchaseInvoices.filter(i=>getMonth(i.date)===selectedMonth);
+  const monthReturns = data.returns.filter(r=>getMonth(r.date)===selectedMonth);
+  const monthExpenses = expenses.filter(e=>e.date?.startsWith(selectedMonth));
+  const monthTotalSales = monthSales.reduce((s,i)=>s+i.amount,0);
+  const monthTotalPurchases = monthPurchases.reduce((s,i)=>s+i.amount,0);
+  const monthTotalReturns = monthReturns.reduce((s,r)=>s+r.amount,0);
+  const monthTotalExpenses = monthExpenses.reduce((s,e)=>s+e.amount,0);
+  const monthTotalTax = monthSales.reduce((s,i)=>s+(i.taxAmount||0),0);
+  const monthNetProfit = monthTotalSales - monthTotalPurchases - monthTotalReturns - monthTotalExpenses;
+  const isMonthClosed = monthlyArchive.some(r=>r.month===selectedMonth);
+
+  const allMonths = [...new Set([
+    ...data.salesInvoices.map(i=>getMonth(i.date)),
+    ...data.purchaseInvoices.map(i=>getMonth(i.date)),
+    today().slice(0,7),
+  ])].filter(Boolean).sort().reverse();
+
+  const dailySalesMap = {};
+  monthSales.forEach(i=>{ dailySalesMap[i.date]=(dailySalesMap[i.date]||0)+i.amount; });
+
+  const catSalesMap = {};
+  monthSales.forEach(inv=>{ (inv.items||[]).forEach(it=>{ const c=it.category||"غير محدد"; catSalesMap[c]=(catSalesMap[c]||0)+it.qty*it.price; }); });
 
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:22 }}>
-      {pwdDialog && <PasswordDialog userEmail={userEmail} onConfirm={pwdDialog.onConfirm} onCancel={()=>setPwdDialog(null)} title="تأكيد تحميل التقرير المالي" />}
-      <PageHeader title="التقارير المالية" icon={I.report} subtitle="تقارير تفصيلية شهرية ويومية"
-        action={<Btn variant="success" onClick={handlePrint}><Ic d={I.download} s={14} />تحميل التقرير</Btn>} />
-      <div style={{ display:"flex",gap:10,alignItems:"center" }}>
-        <div style={{ display:"flex",background:C.surface2,borderRadius:11,padding:3,border:`1px solid ${C.border}` }}>
-          {["monthly","daily"].map(p=>(
-            <button key={p} onClick={()=>setPeriod(p)} style={{ background:period===p?C.accent:"transparent",color:period===p?"#fff":C.textMuted,border:"none",borderRadius:8,padding:"7px 18px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
-              {p==="monthly"?"شهري":"يومي"}
-            </button>
-          ))}
+      {pwdDialog && <PasswordDialog userEmail={userEmail} onConfirm={pwdDialog.onConfirm} onCancel={()=>setPwdDialog(null)} title="تأكيد إغلاق الشهر" />}
+      {confirmClose && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000 }}>
+          <div style={{ background:C.surface,border:`2px solid ${C.accent}33`,borderRadius:20,padding:"32px 36px",maxWidth:400,width:"90%",textAlign:"center" }}>
+            <div style={{ width:56,height:56,borderRadius:"50%",background:C.accentDim,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px" }}>
+              <Ic d={I.stocktake} s={26} c={C.accent} />
+            </div>
+            <h3 style={{ margin:"0 0 10px",fontSize:16,fontWeight:700,color:C.text }}>إغلاق تقرير يوم {selectedDate}</h3>
+            <p style={{ margin:"0 0 24px",fontSize:13,color:C.textMuted,lineHeight:1.8 }}>سيتم إغلاق اليوم وحفظ التقرير في الأرشيف وتنزيل PDF تلقائياً.</p>
+            <div style={{ display:"flex",gap:10,justifyContent:"center" }}>
+              <Btn variant="ghost" onClick={()=>setConfirmClose(false)}>إلغاء</Btn>
+              <Btn onClick={closeDayReport}><Ic d={I.stocktake} s={14} />إغلاق وتنزيل PDF</Btn>
+            </div>
+          </div>
         </div>
-        <Sel value={selectedMonth} onChange={setSelectedMonth} options={months.map(m=>({ value:m,label:m }))} />
+      )}
+      <PageHeader title="التقارير المالية" icon={I.report} subtitle="يومي وشهري مع أرشيف التقارير المغلقة"
+        action={
+          <div style={{ display:"flex",gap:8 }}>
+            {viewMode==="daily" && !isDayClosed && <Btn variant="yellow" onClick={()=>setConfirmClose(true)}><Ic d={I.stocktake} s={14} />إغلاق اليوم + PDF</Btn>}
+            {viewMode==="monthly" && !isMonthClosed && <Btn variant="cyan" onClick={closeMonthManual}><Ic d={I.stocktake} s={14} />إغلاق الشهر يدوياً</Btn>}
+          </div>
+        }
+      />
+      {/* Mode Tabs */}
+      <div style={{ display:"flex",background:C.surface2,borderRadius:12,padding:4,border:`1px solid ${C.border}`,gap:4 }}>
+        {[{id:"daily",label:"📅 يومي"},{id:"monthly",label:"📊 شهري"},{id:"archive",label:"🗂 الأرشيف"}].map(t=>(
+          <button key={t.id} onClick={()=>setViewMode(t.id)} style={{ flex:1,background:viewMode===t.id?C.accent:"transparent",color:viewMode===t.id?"#fff":C.textMuted,border:"none",borderRadius:9,padding:"10px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
+            {t.label}
+          </button>
+        ))}
       </div>
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
-        <MiniStat label="المبيعات" value={fmt(monthData.sales)} color={C.green} icon={I.sales} />
-        <MiniStat label="المشتريات" value={fmt(monthData.purchases)} color={C.red} icon={I.purchase} />
-        <MiniStat label="صافي الربح" value={fmt(profit)} color={profit>=0?C.green:C.red} icon={I.chartBar} />
-        <MiniStat label="المدفوع" value={fmt(monthData.paid)} color={C.accent} icon={I.revenue} />
-      </div>
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
-        <Card>
-          <h3 style={{ margin:"0 0 16px",fontSize:14,fontWeight:700,color:C.text }}>المبيعات حسب الفئة</h3>
-          {Object.keys(catSales).length===0 ? (
-            <div style={{ textAlign:"center",color:C.textMuted,padding:20,fontSize:13 }}>لا توجد بيانات لهذا الشهر</div>
-          ) : (
-            <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-              {Object.entries(catSales).sort((a,b)=>b[1]-a[1]).map(([cat,val])=>{
-                const max=Math.max(...Object.values(catSales));
-                return (
-                  <div key={cat}>
-                    <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-                      <span style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{cat}</span>
-                      <span style={{ fontSize:12,color:C.accent,fontFamily:"monospace",fontWeight:700 }}>{fmt(val)}</span>
-                    </div>
-                    <ProgressBar value={val} max={max} color={C.accent} />
-                  </div>
-                );
-              })}
-            </div>
+
+      {/* ─── DAILY VIEW ─── */}
+      {viewMode==="daily" && (
+        <div style={{ display:"flex",flexDirection:"column",gap:18 }}>
+          <div style={{ display:"flex",gap:12,alignItems:"center" }}>
+            <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}
+              style={{ background:C.surface2,border:`1px solid ${isDayClosed?C.yellow:C.border}`,borderRadius:9,padding:"9px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }} />
+            {isDayClosed && (
+              <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:9,padding:"8px 14px",fontSize:12,color:C.yellow,fontWeight:700 }}>
+                🔒 هذا اليوم مُغلق
+              </div>
+            )}
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:12 }}>
+            <MiniStat label="المبيعات" value={fmt(dayTotalSales)} color={C.green} icon={I.sales} />
+            <MiniStat label="المشتريات" value={fmt(dayTotalPurchases)} color={C.red} icon={I.purchase} />
+            <MiniStat label="صافي الربح" value={fmt(dayNetProfit)} color={dayNetProfit>=0?C.green:C.red} icon={I.chartBar} />
+            <MiniStat label="المحصّل" value={fmt(dayPaid)} color={C.accent} icon={I.revenue} />
+            <MiniStat label="غير محصّل" value={fmt(dayUnpaid)} color={C.yellow} icon={I.alert} />
+            <MiniStat label="المصروفات" value={fmt(dayTotalExpenses)} color={C.purple} icon={I.revenue} />
+          </div>
+          {/* Sales Table */}
+          {daySales.length > 0 && (
+            <Card style={{ padding:0 }}>
+              <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>فواتير المبيعات ({daySales.length})</div>
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["رقم","التاريخ والوقت","العميل","الأصناف","الإجمالي","المدفوع","المتبقي","طريقة الدفع","الحالة"]} />
+                <tbody>
+                  {daySales.map((inv,i)=>(
+                    <TRow key={inv.id} alt={i%2}>
+                      <TD color={C.accent}>{inv.id}</TD>
+                      <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(inv.createdAt||inv.date)}</span></TD>
+                      <TD><span style={{ fontWeight:600 }}>{inv.client}</span></TD>
+                      <TD color={C.textMuted}><span style={{ fontSize:11 }}>{(inv.items||[]).map(x=>x.name).join("، ")||"—"}</span></TD>
+                      <TD mono>{fmt(inv.amount)}</TD>
+                      <TD mono color={C.green}>{fmt(inv.paid)}</TD>
+                      <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
+                      <TD color={inv.paymentMethod==="شيك"?C.yellow:C.green}>{inv.paymentMethod==="شيك"?"📄 شيك":"💵 نقدي"}</TD>
+                      <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
+                    </TRow>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
           )}
-        </Card>
-        <Card>
-          <h3 style={{ margin:"0 0 16px",fontSize:14,fontWeight:700,color:C.text }}>تاريخ الأشهر</h3>
-          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-            {months.slice(0,6).map(m=>{
-              const d=salesByMonth[m]||{};
-              const p=(d.sales||0)-(d.purchases||0);
-              return (
-                <div key={m} onClick={()=>setSelectedMonth(m)} style={{ padding:"10px 14px",background:selectedMonth===m?C.accentDim:C.surface2,borderRadius:11,cursor:"pointer",border:`1px solid ${selectedMonth===m?C.accent+"44":"transparent"}`,display:"flex",justifyContent:"space-between",alignItems:"center",transition:"all 0.15s" }}>
-                  <span style={{ fontSize:13,fontWeight:600,color:C.text }}>{m}</span>
-                  <div style={{ display:"flex",gap:14 }}>
-                    <span style={{ fontSize:11,color:C.green,fontFamily:"monospace" }}>{fmt(d.sales||0)}</span>
-                    <span style={{ fontSize:11,color:p>=0?C.green:C.red,fontFamily:"monospace" }}>{p>=0?"+":""}{fmt(p)}</span>
+          {/* Purchases Table */}
+          {dayPurchases.length > 0 && (
+            <Card style={{ padding:0 }}>
+              <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>فواتير المشتريات ({dayPurchases.length})</div>
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["رقم","التاريخ والوقت","المورد","الإجمالي","المدفوع","المتبقي","طريقة الدفع","الحالة"]} />
+                <tbody>
+                  {dayPurchases.map((inv,i)=>(
+                    <TRow key={inv.id} alt={i%2}>
+                      <TD color={C.accent}>{inv.id}</TD>
+                      <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(inv.createdAt||inv.date)}</span></TD>
+                      <TD><span style={{ fontWeight:600 }}>{inv.supplier}</span></TD>
+                      <TD mono>{fmt(inv.amount)}</TD>
+                      <TD mono color={C.green}>{fmt(inv.paid)}</TD>
+                      <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
+                      <TD color={inv.paymentMethod==="شيك"?C.yellow:C.green}>{inv.paymentMethod==="شيك"?"📄 شيك":"💵 نقدي"}</TD>
+                      <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
+                    </TRow>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+          {dayReturns.length > 0 && (
+            <Card style={{ padding:0 }}>
+              <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>المرتجعات ({dayReturns.length})</div>
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["رقم","التاريخ والوقت","الطرف","المبلغ","السبب"]} />
+                <tbody>
+                  {dayReturns.map((r,i)=>(
+                    <TRow key={r.id} alt={i%2}>
+                      <TD color={C.purple}>{r.id}</TD>
+                      <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(r.createdAt||r.date)}</span></TD>
+                      <TD>{r.party}</TD>
+                      <TD mono color={C.red}>{fmt(r.amount)}</TD>
+                      <TD color={C.textMuted}>{r.reason||"—"}</TD>
+                    </TRow>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+          {dayExpenses.length > 0 && (
+            <Card style={{ padding:0 }}>
+              <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>المصروفات ({dayExpenses.length})</div>
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["رقم","التاريخ والوقت","الوصف","الفئة","المبلغ","طريقة الدفع"]} />
+                <tbody>
+                  {dayExpenses.map((e,i)=>(
+                    <TRow key={e.id} alt={i%2}>
+                      <TD color={C.accent}>{e.id}</TD>
+                      <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(e.createdAt||e.date)}</span></TD>
+                      <TD>{e.description}</TD>
+                      <TD color={C.textDim}>{e.category}</TD>
+                      <TD mono color={C.red}>{fmt(e.amount)}</TD>
+                      <TD color={e.paymentMethod==="شيك"?C.yellow:C.green}>{e.paymentMethod==="شيك"?"📄 شيك":"💵 نقدي"}</TD>
+                    </TRow>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+          {daySales.length===0 && dayPurchases.length===0 && dayReturns.length===0 && dayExpenses.length===0 && (
+            <Card style={{ textAlign:"center",padding:40,color:C.textMuted }}>لا توجد معاملات في هذا اليوم</Card>
+          )}
+        </div>
+      )}
+
+      {/* ─── MONTHLY VIEW ─── */}
+      {viewMode==="monthly" && (
+        <div style={{ display:"flex",flexDirection:"column",gap:18 }}>
+          <div style={{ display:"flex",gap:12,alignItems:"center" }}>
+            <select value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
+              style={{ background:C.surface2,border:`1px solid ${isMonthClosed?C.yellow:C.border}`,borderRadius:9,padding:"9px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}>
+              {allMonths.map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+            {isMonthClosed && (
+              <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:9,padding:"8px 14px",fontSize:12,color:C.yellow,fontWeight:700 }}>
+                🔒 هذا الشهر مُغلق
+              </div>
+            )}
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:12 }}>
+            <MiniStat label="المبيعات" value={fmt(monthTotalSales)} color={C.green} icon={I.sales} />
+            <MiniStat label="المشتريات" value={fmt(monthTotalPurchases)} color={C.red} icon={I.purchase} />
+            <MiniStat label="صافي الربح" value={fmt(monthNetProfit)} color={monthNetProfit>=0?C.green:C.red} icon={I.chartBar} />
+            <MiniStat label="الضرائب" value={fmt(monthTotalTax)} color={C.yellow} icon={I.tax} />
+            <MiniStat label="المرتجعات" value={fmt(monthTotalReturns)} color={C.purple} icon={I.returns} />
+            <MiniStat label="المصروفات" value={fmt(monthTotalExpenses)} color={C.red} icon={I.revenue} />
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+            <Card>
+              <h3 style={{ margin:"0 0 14px",fontSize:14,fontWeight:700,color:C.text }}>المبيعات اليومية — {selectedMonth}</h3>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {Object.entries(dailySalesMap).sort((a,b)=>b[0].localeCompare(a[0])).map(([date,val])=>(
+                  <div key={date} style={{ display:"flex",justifyContent:"space-between",padding:"8px 12px",background:C.surface2,borderRadius:9 }}>
+                    <span style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{date}</span>
+                    <span style={{ fontSize:12,color:C.green,fontFamily:"monospace",fontWeight:700 }}>{fmt(val)}</span>
                   </div>
-                </div>
-              );
-            })}
+                ))}
+                {Object.keys(dailySalesMap).length===0 && <div style={{ textAlign:"center",color:C.textMuted,fontSize:13,padding:20 }}>لا توجد مبيعات</div>}
+              </div>
+            </Card>
+            <Card>
+              <h3 style={{ margin:"0 0 14px",fontSize:14,fontWeight:700,color:C.text }}>المبيعات حسب الفئة</h3>
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                {Object.entries(catSalesMap).sort((a,b)=>b[1]-a[1]).map(([cat,val])=>{
+                  const max = Math.max(...Object.values(catSalesMap));
+                  return (
+                    <div key={cat}>
+                      <div style={{ display:"flex",justifyContent:"space-between",marginBottom:5 }}>
+                        <span style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{cat}</span>
+                        <span style={{ fontSize:12,color:C.accent,fontFamily:"monospace",fontWeight:700 }}>{fmt(val)}</span>
+                      </div>
+                      <ProgressBar value={val} max={max} color={C.accent} />
+                    </div>
+                  );
+                })}
+                {Object.keys(catSalesMap).length===0 && <div style={{ color:C.textMuted,fontSize:13,textAlign:"center",padding:20 }}>لا توجد بيانات</div>}
+              </div>
+            </Card>
           </div>
-        </Card>
-      </div>
-      <Card style={{ padding:0 }}>
-        <div style={{ padding:"14px 18px",borderBottom:`1px solid ${C.border}`,fontSize:14,fontWeight:700,color:C.text }}>فواتير المبيعات — {selectedMonth}</div>
-        <table style={{ width:"100%",borderCollapse:"collapse" }}>
-          <THead cols={["رقم الفاتورة","التاريخ","العميل","الإجمالي","المدفوع","المتبقي","الحالة"]} />
-          <tbody>
-            {filteredSales.map((inv,i)=>(
-              <TRow key={inv.id} alt={i%2}>
-                <TD color={C.accent}>{inv.id}</TD><TD color={C.textDim}>{inv.date}</TD><TD>{inv.client}</TD>
-                <TD mono>{fmt(inv.amount)}</TD><TD mono color={C.green}>{fmt(inv.paid)}</TD>
-                <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
-                <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
-              </TRow>
-            ))}
-          </tbody>
-        </table>
-        {filteredSales.length===0 && <div style={{ padding:30,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد فواتير لهذا الشهر</div>}
-      </Card>
-      <Card style={{ padding:0 }}>
-        <div style={{ padding:"14px 18px",borderBottom:`1px solid ${C.border}`,fontSize:14,fontWeight:700,color:C.text }}>فواتير المشتريات — {selectedMonth}</div>
-        <table style={{ width:"100%",borderCollapse:"collapse" }}>
-          <THead cols={["رقم الفاتورة","التاريخ","المورد","الإجمالي","المدفوع","المتبقي","الحالة"]} />
-          <tbody>
-            {filteredPurchases.map((inv,i)=>(
-              <TRow key={inv.id} alt={i%2}>
-                <TD color={C.accent}>{inv.id}</TD><TD color={C.textDim}>{inv.date}</TD><TD>{inv.supplier}</TD>
-                <TD mono>{fmt(inv.amount)}</TD><TD mono color={C.green}>{fmt(inv.paid)}</TD>
-                <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
-                <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
-              </TRow>
-            ))}
-          </tbody>
-        </table>
-        {filteredPurchases.length===0 && <div style={{ padding:30,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد فواتير مشتريات لهذا الشهر</div>}
-      </Card>
-    </div>
-  );
-}
+          {/* Monthly Sales Table */}
+          <Card style={{ padding:0 }}>
+            <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>فواتير المبيعات ({monthSales.length})</div>
+            <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <THead cols={["رقم","التاريخ والوقت","العميل","الإجمالي","المدفوع","المتبقي","طريقة الدفع","الحالة"]} />
+              <tbody>
+                {monthSales.map((inv,i)=>(
+                  <TRow key={inv.id} alt={i%2}>
+                    <TD color={C.accent}>{inv.id}</TD>
+                    <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(inv.createdAt||inv.date)}</span></TD>
+                    <TD><span style={{ fontWeight:600 }}>{inv.client}</span></TD>
+                    <TD mono>{fmt(inv.amount)}</TD>
+                    <TD mono color={C.green}>{fmt(inv.paid)}</TD>
+                    <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
+                    <TD color={inv.paymentMethod==="شيك"?C.yellow:C.green}>{inv.paymentMethod==="شيك"?"📄 شيك":"💵 نقدي"}</TD>
+                    <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
+                  </TRow>
+                ))}
+              </tbody>
+            </table>
+            {monthSales.length===0 && <div style={{ padding:24,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد فواتير مبيعات</div>}
+          </Card>
+          <Card style={{ padding:0 }}>
+            <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>فواتير المشتريات ({monthPurchases.length})</div>
+            <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <THead cols={["رقم","التاريخ والوقت","المورد","الإجمالي","المدفوع","المتبقي","الحالة"]} />
+              <tbody>
+                {monthPurchases.map((inv,i)=>(
+                  <TRow key={inv.id} alt={i%2}>
+                    <TD color={C.accent}>{inv.id}</TD>
+                    <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(inv.createdAt||inv.date)}</span></TD>
+                    <TD><span style={{ fontWeight:600 }}>{inv.supplier}</span></TD>
+                    <TD mono>{fmt(inv.amount)}</TD>
+                    <TD mono color={C.green}>{fmt(inv.paid)}</TD>
+                    <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
+                    <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
+                  </TRow>
+                ))}
+              </tbody>
+            </table>
+            {monthPurchases.length===0 && <div style={{ padding:24,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد فواتير مشتريات</div>}
+          </Card>
+          {monthReturns.length > 0 && (
+            <Card style={{ padding:0 }}>
+              <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>المرتجعات ({monthReturns.length})</div>
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["رقم","التاريخ والوقت","الطرف","المبلغ","السبب"]} />
+                <tbody>
+                  {monthReturns.map((r,i)=>(
+                    <TRow key={r.id} alt={i%2}>
+                      <TD color={C.purple}>{r.id}</TD>
+                      <TD color={C.textDim}><span style={{ fontSize:11 }}>{fmtDateTime(r.createdAt||r.date)}</span></TD>
+                      <TD>{r.party}</TD>
+                      <TD mono color={C.red}>{fmt(r.amount)}</TD>
+                      <TD color={C.textMuted}>{r.reason||"—"}</TD>
+                    </TRow>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </div>
+      )}
 
-// ─── RETURNS PAGE ─────────────────────────────────────────────────────────────
-function ReturnsPage({ returns, salesInvoices, purchaseInvoices, clients, suppliers, onAdd, onDelete }) {
-  const [showModal, setShowModal] = useState(false);
-  const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ date:today(),type:"sales",invoiceId:"",party:"",amount:"",reason:"" });
-
-  const invoiceList = form.type==="sales"?salesInvoices:purchaseInvoices;
-  const partyList = form.type==="sales"?clients:suppliers;
-  const partyKey = form.type==="sales"?"client":"supplier";
-
-  const handleSave = () => {
-    if (!form.party||!form.amount) return;
-    onAdd({ id:"R"+Date.now().toString().slice(-5),date:form.date,type:form.type,invoiceId:form.invoiceId,party:form.party,amount:parseFloat(form.amount)||0,reason:form.reason });
-    setShowModal(false);
-    setForm({ date:today(),type:"sales",invoiceId:"",party:"",amount:"",reason:"" });
-  };
-
-  const totalReturns = returns.reduce((s,r)=>s+r.amount,0);
-  const salesReturns = returns.filter(r=>r.type==="sales").reduce((s,r)=>s+r.amount,0);
-  const purchaseReturns = returns.filter(r=>r.type==="purchase").reduce((s,r)=>s+r.amount,0);
-
-  return (
-    <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
-      {confirm && <ConfirmDialog message={confirm.msg} onConfirm={()=>{ onDelete(confirm.id); setConfirm(null); }} onCancel={()=>setConfirm(null)} />}
-      <PageHeader title="المرتجعات" icon={I.returns} subtitle={`${returns.length} مرتجع مسجل`}
-        action={<Btn onClick={()=>setShowModal(true)}><Ic d={I.plus} s={14} />مرتجع جديد</Btn>} />
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12 }}>
-        <MiniStat label="إجمالي المرتجعات" value={fmt(totalReturns)} color={C.purple} icon={I.returns} />
-        <MiniStat label="مرتجعات مبيعات" value={fmt(salesReturns)} color={C.red} icon={I.sales} />
-        <MiniStat label="مرتجعات مشتريات" value={fmt(purchaseReturns)} color={C.green} icon={I.purchase} />
-      </div>
-      <Card style={{ padding:0 }}>
-        <table style={{ width:"100%",borderCollapse:"collapse" }}>
-          <THead cols={["رقم المرتجع","التاريخ","النوع","الطرف","رقم الفاتورة","المبلغ","السبب",""]} />
-          <tbody>
-            {returns.map((r,i)=>(
-              <TRow key={r.id} alt={i%2}>
-                <TD color={C.purple}><span style={{ fontWeight:700 }}>{r.id}</span></TD>
-                <TD color={C.textDim}>{r.date}</TD>
-                <TD><Badge label="مرتجع" /></TD>
-                <TD>{r.party}</TD>
-                <TD color={C.accent}>{r.invoiceId||"—"}</TD>
-                <TD mono color={C.red}>{fmt(r.amount)}</TD>
-                <TD color={C.textMuted}>{r.reason||"—"}</TD>
-                <td style={{ padding:"11px 14px" }}>
-                  <button onClick={()=>setConfirm({ id:r.id,msg:`هل أنت متأكد من حذف المرتجع ${r.id}؟` })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
-                </td>
-              </TRow>
-            ))}
-          </tbody>
-        </table>
-        {returns.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد مرتجعات</div>}
-      </Card>
-      {showModal && (
-        <Modal title="مرتجع جديد" onClose={()=>setShowModal(false)}>
-          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-              <Inp label="التاريخ" type="date" value={form.date} onChange={v=>setForm({...form,date:v})} />
-              <Sel label="نوع المرتجع" value={form.type} onChange={v=>setForm({...form,type:v,invoiceId:"",party:""})} options={[{ value:"sales",label:"مرتجع مبيعات" },{ value:"purchase",label:"مرتجع مشتريات" }]} />
-              <Sel label="الطرف" value={form.party} onChange={v=>setForm({...form,party:v})} options={partyList.map(p=>({ value:p.name,label:p.name }))} />
-              <Sel label="رقم الفاتورة (اختياري)" value={form.invoiceId} onChange={v=>setForm({...form,invoiceId:v})} options={invoiceList.filter(i=>i[partyKey]===form.party).map(i=>({ value:i.id,label:i.id }))} placeholder="-- اختياري --" />
-              <Inp label="المبلغ المرتجع" type="number" value={form.amount} onChange={v=>setForm({...form,amount:v})} required />
-            </div>
-            <Inp label="سبب المرتجع" value={form.reason} onChange={v=>setForm({...form,reason:v})} placeholder="وصف سبب الإرجاع..." />
-            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
-              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
-              <Btn onClick={handleSave}>حفظ المرتجع</Btn>
-            </div>
-          </div>
-        </Modal>
+      {/* ─── ARCHIVE VIEW ─── */}
+      {viewMode==="archive" && (
+        <div style={{ display:"flex",flexDirection:"column",gap:22 }}>
+          {/* Monthly Archive */}
+          <Card>
+            <h3 style={{ margin:"0 0 16px",fontSize:15,fontWeight:700,color:C.text }}>🗂 التقارير الشهرية المغلقة</h3>
+            {monthlyArchive.length===0 ? (
+              <div style={{ textAlign:"center",color:C.textMuted,padding:30,fontSize:13 }}>لا توجد تقارير شهرية مُغلقة بعد</div>
+            ) : (
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                {[...monthlyArchive].sort((a,b)=>b.month.localeCompare(a.month)).map(r=>{
+                  const [y,m] = r.month.split("-");
+                  const label = new Date(+y, +m-1, 1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"});
+                  return (
+                    <div key={r.month} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                      <div>
+                        <div style={{ fontSize:14,fontWeight:700,color:C.text,marginBottom:6 }}>📊 تقرير {label}</div>
+                        <div style={{ display:"flex",gap:16,flexWrap:"wrap" }}>
+                          <span style={{ fontSize:11,color:C.green }}>مبيعات: {fmt(r.totalSales)}</span>
+                          <span style={{ fontSize:11,color:C.red }}>مشتريات: {fmt(r.totalPurchases)}</span>
+                          <span style={{ fontSize:11,color:r.netProfit>=0?C.green:C.red }}>ربح: {fmt(r.netProfit)}</span>
+                          <span style={{ fontSize:11,color:C.yellow }}>ضرائب: {fmt(r.totalTax||0)}</span>
+                        </div>
+                        <div style={{ fontSize:10,color:C.textMuted,marginTop:4 }}>
+                          {r.auto?"🤖 مُغلق تلقائياً":"👤 مُغلق يدوياً"} — {fmtDateTime(r.closedAt)}
+                        </div>
+                      </div>
+                      <Btn variant="success" small onClick={()=>downloadArchive(r.htmlContent, `تقرير_${r.month}`)}>
+                        <Ic d={I.download} s={13} />تنزيل PDF
+                      </Btn>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+          {/* Daily Archive */}
+          <Card>
+            <h3 style={{ margin:"0 0 16px",fontSize:15,fontWeight:700,color:C.text }}>📅 التقارير اليومية المغلقة</h3>
+            {dailyArchive.length===0 ? (
+              <div style={{ textAlign:"center",color:C.textMuted,padding:30,fontSize:13 }}>لا توجد تقارير يومية مُغلقة بعد</div>
+            ) : (
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                {[...dailyArchive].sort((a,b)=>b.date.localeCompare(a.date)).map(r=>(
+                  <div key={r.date} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>
+                        📅 {new Date(r.date+"T00:00:00").toLocaleDateString("ar-EG",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}
+                      </div>
+                      <div style={{ display:"flex",gap:14,flexWrap:"wrap" }}>
+                        <span style={{ fontSize:11,color:C.green }}>مبيعات: {fmt(r.totalSales)}</span>
+                        <span style={{ fontSize:11,color:C.red }}>مشتريات: {fmt(r.totalPurchases)}</span>
+                        <span style={{ fontSize:11,color:r.netProfit>=0?C.green:C.red }}>ربح: {fmt(r.netProfit)}</span>
+                        <span style={{ fontSize:11,color:C.textMuted }}>فواتير: {r.salesCount||0}</span>
+                      </div>
+                      <div style={{ fontSize:10,color:C.textMuted,marginTop:4 }}>🔒 مُغلق في {fmtDateTime(r.closedAt)}</div>
+                    </div>
+                    <Btn variant="ghost" small onClick={()=>downloadArchive(r.htmlContent, `تقرير_${r.date}`)}>
+                      <Ic d={I.download} s={13} />PDF
+                    </Btn>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
       )}
     </div>
   );
 }
 
-// ─── REVENUE PAGE ─────────────────────────────────────────────────────────────
-function RevenuePage({ data, onDeleteMonth, userEmail }) {
-  const [confirm, setConfirm] = useState(null);
-  const [pwdDialog, setPwdDialog] = useState(null);
-
-  const totalSales = data.salesInvoices.reduce((s,i)=>s+i.amount,0);
-  const totalPurchases = data.purchaseInvoices.reduce((s,i)=>s+i.amount,0);
-  const totalReturns = data.returns.reduce((s,r)=>s+r.amount,0);
-  const totalTax = data.salesInvoices.reduce((s,i)=>s+(i.taxAmount||0),0);
-  const netRevenue = totalSales-totalReturns;
-  const grossProfit = netRevenue-totalPurchases;
-  const netProfit = grossProfit-totalTax;
-
-  const clientRevenue={};
-  data.salesInvoices.forEach(i=>{ clientRevenue[i.client]=(clientRevenue[i.client]||0)+i.amount; });
-  const topClients = Object.entries(clientRevenue).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const maxClient = topClients[0]?.[1]||1;
-
-  const monthlyRev={};
-  data.salesInvoices.forEach(i=>{ const m=getMonth(i.date); monthlyRev[m]=(monthlyRev[m]||0)+i.amount; });
-
-  const handleDeleteMonth = (month) => {
-    setPwdDialog({ month, onConfirm: () => {
-      setPwdDialog(null);
-      setConfirm({ month, msg:`هل أنت متأكد من حذف كل بيانات شهر "${month}"؟ لا يمكن التراجع عن هذا الإجراء.` });
-    }});
-  };
-
-  return (
-    <div style={{ display:"flex",flexDirection:"column",gap:22 }}>
-      {confirm && <ConfirmDialog message={confirm.msg} onConfirm={()=>{ onDeleteMonth(confirm.month); setConfirm(null); }} onCancel={()=>setConfirm(null)} />}
-      {pwdDialog && <PasswordDialog userEmail={userEmail} onConfirm={pwdDialog.onConfirm} onCancel={()=>setPwdDialog(null)} title="تأكيد حذف بيانات الشهر" />}
-      <PageHeader title="الإيرادات" icon={I.revenue} subtitle="تحليل شامل للإيرادات والأرباح" />
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14 }}>
-        {[
-          { label:"صافي الإيرادات",val:netRevenue,color:C.green,icon:I.revenue },
-          { label:"إجمالي المشتريات",val:totalPurchases,color:C.red,icon:I.purchase },
-          { label:"مجمل الربح",val:grossProfit,color:grossProfit>=0?C.green:C.red,icon:I.chartBar },
-          { label:"صافي الربح",val:netProfit,color:netProfit>=0?C.green:C.red,icon:I.chartBar },
-        ].map(s=>(
-          <GlowCard key={s.label} color={s.color} style={{ padding:"18px 20px" }}>
-            <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:10 }}>
-              <div style={{ background:s.color+"18",padding:7,borderRadius:8 }}><Ic d={s.icon} s={14} c={s.color} /></div>
-              <span style={{ fontSize:11,color:C.textMuted,fontWeight:600 }}>{s.label}</span>
-            </div>
-            <div style={{ fontSize:21,fontWeight:800,color:s.color,fontFamily:"monospace" }}>{fmt(s.val)}</div>
-          </GlowCard>
-        ))}
-      </div>
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
-        <Card>
-          <h3 style={{ margin:"0 0 16px",fontSize:14,fontWeight:700,color:C.text }}>أفضل العملاء</h3>
-          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-            {topClients.map(([name,val])=>(
-              <div key={name}>
-                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-                  <span style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{name}</span>
-                  <span style={{ fontSize:12,color:C.green,fontFamily:"monospace",fontWeight:700 }}>{fmt(val)}</span>
-                </div>
-                <ProgressBar value={val} max={maxClient} color={C.green} />
-              </div>
-            ))}
-            {topClients.length===0 && <div style={{ textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد بيانات</div>}
-          </div>
-        </Card>
-        <Card>
-          <h3 style={{ margin:"0 0 16px",fontSize:14,fontWeight:700,color:C.text }}>الإيرادات الشهرية</h3>
-          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-            {Object.entries(monthlyRev).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6).map(([month,val])=>(
-              <div key={month} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:C.surface2,borderRadius:11,border:`1px solid ${C.border}` }}>
-                <span style={{ fontSize:13,color:C.text,fontWeight:600 }}>{month}</span>
-                <div style={{ display:"flex",gap:10,alignItems:"center" }}>
-                  <span style={{ fontSize:13,color:C.green,fontFamily:"monospace",fontWeight:700 }}>{fmt(val)}</span>
-                  <button onClick={()=>handleDeleteMonth(month)} style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:7,padding:"4px 10px",cursor:"pointer",color:C.red,fontSize:11,fontWeight:600,fontFamily:"inherit",display:"flex",alignItems:"center",gap:4 }}>
-                    <Ic d={I.trash} s={11} />حذف الشهر
-                  </button>
-                </div>
-              </div>
-            ))}
-            {Object.keys(monthlyRev).length===0 && <div style={{ textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد بيانات</div>}
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ─── TAX INVOICES PAGE ────────────────────────────────────────────────────────
-function TaxInvoicesPage({ salesInvoices, purchaseInvoices }) {
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-
-  const allWithTax = [
-    ...salesInvoices.filter(i=>i.taxAmount>0).map(i=>({...i,_type:"sales"})),
-    ...purchaseInvoices.filter(i=>i.taxAmount>0).map(i=>({...i,_type:"purchases"})),
-  ].sort((a,b)=>b.date.localeCompare(a.date));
-
-  const filtered = allWithTax.filter(i=>{
-    const party = i._type==="sales"?i.client:i.supplier;
-    const matchSearch = party?.includes(search)||i.id?.includes(search);
-    const matchType = typeFilter==="all"||(typeFilter==="sales"&&i._type==="sales")||(typeFilter==="purchases"&&i._type==="purchases");
-    return matchSearch&&matchType;
-  });
-
-  const totalTax = filtered.reduce((s,i)=>s+(i.taxAmount||0),0);
-
-  return (
-    <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
-      <PageHeader title="الفواتير الضريبية" icon={I.tax} subtitle={`${filtered.length} فاتورة ضريبية`} />
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12 }}>
-        <MiniStat label="إجمالي الضرائب" value={fmt(totalTax)} color={C.yellow} icon={I.tax} />
-        <MiniStat label="فواتير مبيعات" value={allWithTax.filter(i=>i._type==="sales").length} color={C.green} icon={I.sales} />
-        <MiniStat label="فواتير مشتريات" value={allWithTax.filter(i=>i._type==="purchases").length} color={C.red} icon={I.purchase} />
-      </div>
-      <Card style={{ padding:0 }}>
-        <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:10,alignItems:"center" }}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="ابحث بالاسم أو الرقم..."
-            style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none",width:220 }} />
-          <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}
-            style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
-            <option value="all">الكل</option>
-            <option value="sales">مبيعات</option>
-            <option value="purchases">مشتريات</option>
-          </select>
-        </div>
-        <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%",borderCollapse:"collapse" }}>
-            <THead cols={["رقم الفاتورة","التاريخ","النوع","العميل/المورد","الإجمالي قبل الضريبة","نسبة الضريبة","قيمة الضريبة","الإجمالي شامل الضريبة","الحالة","طباعة"]} />
-            <tbody>
-              {filtered.map((inv,idx)=>{
-                const party = inv._type==="sales"?inv.client:inv.supplier;
-                return (
-                  <TRow key={inv.id+inv._type} alt={idx%2}>
-                    <TD color={C.accent}><span style={{ fontWeight:700 }}>{inv.id}</span></TD>
-                    <TD color={C.textDim}>{inv.date}</TD>
-                    <td style={{ padding:"11px 14px" }}>
-                      <span style={{ background:inv._type==="sales"?C.greenDim:C.redDim,color:inv._type==="sales"?C.green:C.red,border:`1px solid ${inv._type==="sales"?C.green:C.red}33`,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>
-                        {inv._type==="sales"?"مبيعات":"مشتريات"}
-                      </span>
-                    </td>
-                    <TD><span style={{ fontWeight:600 }}>{party}</span></TD>
-                    <TD mono color={C.textDim}>{fmt(inv.subtotal||inv.amount)}</TD>
-                    <TD mono color={C.yellow}>{inv.taxRate||14}%</TD>
-                    <TD mono color={C.yellow}><span style={{ fontWeight:700 }}>{fmt(inv.taxAmount||0)}</span></TD>
-                    <TD mono><span style={{ fontWeight:700 }}>{fmt(inv.amount)}</span></TD>
-                    <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
-                    <td style={{ padding:"11px 14px" }}>
-                      <button onClick={()=>printTaxInvoice(inv)} title="طباعة الفاتورة الضريبية"
-                        style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:7,padding:"5px 10px",cursor:"pointer",color:C.yellow,display:"flex",alignItems:"center",gap:4 }}>
-                        <Ic d={I.print} s={13} />ضريبية
-                      </button>
-                    </td>
-                  </TRow>
-                );
-              })}
-            </tbody>
-          </table>
-          {filtered.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد فواتير ضريبية</div>}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-// ─── MONTHLY REPORTS PAGE ─────────────────────────────────────────────────────
-function MonthlyReportsPage({ data }) {
-  const [selectedMonth, setSelectedMonth] = useState(today().slice(0,7));
-
-  const allMonths = [...new Set([
-    ...data.salesInvoices.map(i=>getMonth(i.date)),
-    ...data.purchaseInvoices.map(i=>getMonth(i.date)),
-  ])].sort().reverse();
-
-  const filteredSales = data.salesInvoices.filter(i=>getMonth(i.date)===selectedMonth);
-  const filteredPurchases = data.purchaseInvoices.filter(i=>getMonth(i.date)===selectedMonth);
-  const filteredReturns = data.returns.filter(r=>getMonth(r.date)===selectedMonth);
-
-  const totalSales = filteredSales.reduce((s,i)=>s+i.amount,0);
-  const totalPurchases = filteredPurchases.reduce((s,i)=>s+i.amount,0);
-  const totalPaid = filteredSales.reduce((s,i)=>s+i.paid,0);
-  const totalTax = filteredSales.reduce((s,i)=>s+(i.taxAmount||0),0);
-  const totalReturns = filteredReturns.reduce((s,r)=>s+r.amount,0);
-  const profit = totalSales - totalPurchases;
-
-  const dailySales = {};
-  filteredSales.forEach(i=>{ dailySales[i.date]=(dailySales[i.date]||0)+i.amount; });
-
-  return (
-    <div style={{ display:"flex",flexDirection:"column",gap:22 }}>
-      <PageHeader title="التقارير الشهرية" icon={I.calendar} subtitle="تقرير مفصل شهر بشهر"
-        action={<Btn variant="success" onClick={()=>printFinancialReport(data,"monthly",selectedMonth)}><Ic d={I.download} s={14} />تحميل</Btn>} />
-      <div style={{ display:"flex",gap:10,alignItems:"center" }}>
-        <select value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
-          style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}>
-          {allMonths.map(m=><option key={m} value={m}>{m}</option>)}
-        </select>
-        <div style={{ fontSize:12,color:C.textMuted }}>اختر الشهر لعرض التقرير</div>
-      </div>
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:12 }}>
-        <MiniStat label="المبيعات" value={fmt(totalSales)} color={C.green} icon={I.sales} />
-        <MiniStat label="المشتريات" value={fmt(totalPurchases)} color={C.red} icon={I.purchase} />
-        <MiniStat label="صافي الربح" value={fmt(profit)} color={profit>=0?C.green:C.red} icon={I.chartBar} />
-        <MiniStat label="المدفوع" value={fmt(totalPaid)} color={C.accent} icon={I.revenue} />
-        <MiniStat label="الضرائب" value={fmt(totalTax)} color={C.yellow} icon={I.tax} />
-        <MiniStat label="المرتجعات" value={fmt(totalReturns)} color={C.purple} icon={I.returns} />
-      </div>
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
-        <Card>
-          <h3 style={{ margin:"0 0 14px",fontSize:14,fontWeight:700,color:C.text }}>المبيعات اليومية — {selectedMonth}</h3>
-          <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-            {Object.entries(dailySales).sort((a,b)=>b[0].localeCompare(a[0])).map(([date,val])=>(
-              <div key={date} style={{ display:"flex",justifyContent:"space-between",padding:"8px 12px",background:C.surface2,borderRadius:9 }}>
-                <span style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{date}</span>
-                <span style={{ fontSize:12,color:C.green,fontFamily:"monospace",fontWeight:700 }}>{fmt(val)}</span>
-              </div>
-            ))}
-            {Object.keys(dailySales).length===0 && <div style={{ textAlign:"center",color:C.textMuted,fontSize:13,padding:20 }}>لا توجد مبيعات</div>}
-          </div>
-        </Card>
-        <Card>
-          <h3 style={{ margin:"0 0 14px",fontSize:14,fontWeight:700,color:C.text }}>ملخص {selectedMonth}</h3>
-          <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
-            {[
-              { label:"عدد فواتير المبيعات",val:filteredSales.length,color:C.green },
-              { label:"عدد فواتير المشتريات",val:filteredPurchases.length,color:C.red },
-              { label:"عدد المرتجعات",val:filteredReturns.length,color:C.purple },
-              { label:"متوسط قيمة الفاتورة",val:fmt(filteredSales.length>0?totalSales/filteredSales.length:0),color:C.accent },
-            ].map(s=>(
-              <div key={s.label} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:C.surface2,borderRadius:10 }}>
-                <span style={{ fontSize:12,color:C.textMuted }}>{s.label}</span>
-                <span style={{ fontSize:13,color:s.color,fontWeight:700,fontFamily:"monospace" }}>{s.val}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-      <Card style={{ padding:0 }}>
-        <div style={{ padding:"14px 18px",borderBottom:`1px solid ${C.border}`,fontSize:14,fontWeight:700,color:C.text }}>فواتير المبيعات — {selectedMonth}</div>
-        <table style={{ width:"100%",borderCollapse:"collapse" }}>
-          <THead cols={["رقم الفاتورة","التاريخ","العميل","الإجمالي","المدفوع","المتبقي","الحالة"]} />
-          <tbody>
-            {filteredSales.map((inv,i)=>(
-              <TRow key={inv.id} alt={i%2}>
-                <TD color={C.accent}>{inv.id}</TD><TD color={C.textDim}>{inv.date}</TD><TD>{inv.client}</TD>
-                <TD mono>{fmt(inv.amount)}</TD><TD mono color={C.green}>{fmt(inv.paid)}</TD>
-                <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
-                <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
-              </TRow>
-            ))}
-          </tbody>
-        </table>
-        {filteredSales.length===0 && <div style={{ padding:24,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد فواتير</div>}
-      </Card>
-    </div>
-  );
-}
 
 // ─── INVENTORY ITEMS PAGE (المخزون كأصناف) ────────────────────────────────────
 function InventoryItemsPage({ inventory, categories }) {
@@ -1935,11 +2483,7 @@ function InventoryPage({ inventory, categories, onAdd, onEdit, onDelete, onBulkA
             {categories.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
           <div style={{ marginRight:"auto",display:"flex",gap:8 }}>
-            <select value={stocktakePeriod} onChange={e=>setStocktakePeriod(e.target.value)}
-              style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
-              <option value="monthly">جرد شهري</option>
-              <option value="weekly">جرد أسبوعي</option>
-            </select>
+            <span style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>جرد شهري</span>
             <input type="month" value={stocktakeMonth} onChange={e=>setStocktakeMonth(e.target.value)}
               style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none" }} />
             <Btn variant="success" small onClick={()=>printStocktakeReport(filtered,stocktakePeriod,stocktakeMonth)}>
@@ -2013,7 +2557,7 @@ function StocktakePage({ inventory, categories }) {
 
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
-      <PageHeader title="الجرد الدوري" icon={I.stocktake} subtitle="جرد شهري وأسبوعي للمخزون"
+      <PageHeader title="الجرد الدوري" icon={I.stocktake} subtitle="الجرد الشهري للمخزون"
         action={
           <div style={{ display:"flex",gap:8 }}>
             <Btn variant="success" onClick={()=>printStocktakeReport(filtered,period,selectedMonth)}>
@@ -2024,11 +2568,9 @@ function StocktakePage({ inventory, categories }) {
       />
       <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
         <div style={{ display:"flex",background:C.surface2,borderRadius:11,padding:3,border:`1px solid ${C.border}` }}>
-          {["monthly","weekly"].map(p=>(
-            <button key={p} onClick={()=>setPeriod(p)} style={{ background:period===p?C.accent:"transparent",color:period===p?"#fff":C.textMuted,border:"none",borderRadius:8,padding:"7px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
-              {p==="monthly"?"شهري":"أسبوعي"}
-            </button>
-          ))}
+          <button style={{ background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"7px 16px",fontSize:12,fontWeight:600,cursor:"default",fontFamily:"inherit" }}>
+            شهري
+          </button>
         </div>
         <input type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
           style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none" }} />
@@ -2085,7 +2627,7 @@ function StocktakePage({ inventory, categories }) {
       )}
       <Card style={{ padding:0 }}>
         <div style={{ padding:"14px 18px",borderBottom:`1px solid ${C.border}`,fontSize:14,fontWeight:700,color:C.text }}>
-          تفاصيل الجرد — {period==="monthly"?"شهري":"أسبوعي"} — {selectedMonth}
+          تفاصيل الجرد الشهري — {selectedMonth}
         </div>
         <div style={{ overflowX:"auto" }}>
           <table style={{ width:"100%",borderCollapse:"collapse" }}>
@@ -2113,6 +2655,560 @@ function StocktakePage({ inventory, categories }) {
           {filtered.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد أصناف</div>}
         </div>
       </Card>
+    </div>
+  );
+}
+
+
+// ─── EMPLOYEES PAGE ───────────────────────────────────────────────────────────
+function EmployeesPage() {
+  const [employees, setEmployees] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("employees_local")||"[]"); } catch { return []; }
+  });
+  const [salaries, setSalaries] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("salaries_local")||"[]"); } catch { return []; }
+  });
+  const [attendance, setAttendance] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("attendance_local")||"[]"); } catch { return []; }
+  });
+  const [advances, setAdvances] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("advances_local")||"[]"); } catch { return []; }
+  });
+  const [tab, setTab] = useState("employees");
+  const [showModal, setShowModal] = useState(false);
+  const [modalType, setModalType] = useState("employee");
+  const [confirm, setConfirm] = useState(null);
+  const [empForm, setEmpForm] = useState({ name:"", position:"", baseSalary:"", phone:"", startDate:today(), notes:"" });
+  const [salForm, setSalForm] = useState({ employeeId:"", month:today().slice(0,7), baseSalary:"", bonus:"", deductions:"", notes:"", paymentMethod:"نقدي" });
+  const [attForm, setAttForm] = useState({ employeeId:"", date:today(), type:"غياب", reason:"" });
+  const [advForm, setAdvForm] = useState({ employeeId:"", date:today(), amount:"", reason:"", status:"قيد السداد" });
+
+  const saveEmp = (list) => { setEmployees(list); localStorage.setItem("employees_local", JSON.stringify(list)); };
+  const saveSal = (list) => { setSalaries(list); localStorage.setItem("salaries_local", JSON.stringify(list)); };
+  const saveAtt = (list) => { setAttendance(list); localStorage.setItem("attendance_local", JSON.stringify(list)); };
+  const saveAdv = (list) => { setAdvances(list); localStorage.setItem("advances_local", JSON.stringify(list)); };
+
+  const openModal = (type) => { setModalType(type); setShowModal(true); };
+
+  const handleSaveEmployee = () => {
+    if (!empForm.name.trim()) return;
+    saveEmp([...employees, { id:"EMP"+Date.now().toString().slice(-5), ...empForm, baseSalary:parseFloat(empForm.baseSalary)||0 }]);
+    setShowModal(false);
+    setEmpForm({ name:"", position:"", baseSalary:"", phone:"", startDate:today(), notes:"" });
+  };
+
+  const handleSaveSalary = () => {
+    if (!salForm.employeeId) return;
+    const emp = employees.find(e=>e.id===salForm.employeeId);
+    const base = parseFloat(salForm.baseSalary)||(emp?.baseSalary||0);
+    const bonus = parseFloat(salForm.bonus)||0;
+    const deductions = parseFloat(salForm.deductions)||0;
+    const net = base + bonus - deductions;
+    saveSal([...salaries, { id:"SAL"+Date.now().toString().slice(-5), ...salForm, baseSalary:base, bonus, deductions, netSalary:net, employeeName:emp?.name||"" }]);
+    setShowModal(false);
+    setSalForm({ employeeId:"", month:today().slice(0,7), baseSalary:"", bonus:"", deductions:"", notes:"", paymentMethod:"نقدي" });
+  };
+
+  const handleSaveAttendance = () => {
+    if (!attForm.employeeId) return;
+    const emp = employees.find(e=>e.id===attForm.employeeId);
+    saveAtt([...attendance, { id:"ATT"+Date.now().toString().slice(-5), ...attForm, employeeName:emp?.name||"" }]);
+    setShowModal(false);
+    setAttForm({ employeeId:"", date:today(), type:"غياب", reason:"" });
+  };
+
+  const handleSaveAdvance = () => {
+    if (!advForm.employeeId||!advForm.amount) return;
+    const emp = employees.find(e=>e.id===advForm.employeeId);
+    saveAdv([...advances, { id:"ADV"+Date.now().toString().slice(-5), ...advForm, amount:parseFloat(advForm.amount)||0, employeeName:emp?.name||"" }]);
+    setShowModal(false);
+    setAdvForm({ employeeId:"", date:today(), amount:"", reason:"", status:"قيد السداد" });
+  };
+
+  const totalSalaries = salaries.reduce((s,r)=>s+r.netSalary,0);
+  const totalAdvances = advances.filter(a=>a.status==="قيد السداد").reduce((s,a)=>s+a.amount,0);
+  const absences = attendance.filter(a=>a.type==="غياب").length;
+  const leaveDays = attendance.filter(a=>a.type==="إجازة").length;
+
+  const tabs = [
+    { id:"employees", label:"الموظفين" },
+    { id:"salaries", label:"المرتبات" },
+    { id:"attendance", label:"الغياب والإجازات" },
+    { id:"advances", label:"السلف" },
+  ];
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+      <PageHeader title="إدارة الموظفين" icon={I.clients} subtitle={`${employees.length} موظف`}
+        action={
+          <div style={{ display:"flex",gap:8 }}>
+            {tab==="employees" && <Btn onClick={()=>openModal("employee")}><Ic d={I.plus} s={14} />موظف جديد</Btn>}
+            {tab==="salaries" && <Btn onClick={()=>openModal("salary")} variant="success"><Ic d={I.plus} s={14} />صرف مرتب</Btn>}
+            {tab==="attendance" && <Btn onClick={()=>openModal("attendance")} variant="yellow"><Ic d={I.plus} s={14} />تسجيل غياب/إجازة</Btn>}
+            {tab==="advances" && <Btn onClick={()=>openModal("advance")} variant="purple"><Ic d={I.plus} s={14} />سلفة جديدة</Btn>}
+          </div>
+        }
+      />
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
+        <MiniStat label="عدد الموظفين" value={employees.length} color={C.accent} icon={I.clients} />
+        <MiniStat label="إجمالي المرتبات" value={fmt(totalSalaries)} color={C.green} icon={I.revenue} />
+        <MiniStat label="السلف القائمة" value={fmt(totalAdvances)} color={C.red} icon={I.alert} />
+        <MiniStat label={`غياب: ${absences} / إجازات: ${leaveDays}`} value={absences+leaveDays+" يوم"} color={C.yellow} icon={I.calendar} />
+      </div>
+      {/* Tabs */}
+      <div style={{ display:"flex",background:C.surface2,borderRadius:12,padding:4,border:`1px solid ${C.border}`,gap:4 }}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1,background:tab===t.id?C.accent:"transparent",color:tab===t.id?"#fff":C.textMuted,border:"none",borderRadius:9,padding:"9px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {/* Employees Tab */}
+      {tab==="employees" && (
+        <Card style={{ padding:0 }}>
+          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+            <THead cols={["الكود","الاسم","المنصب","الراتب الأساسي","الهاتف","تاريخ التعيين","ملاحظات",""]} />
+            <tbody>
+              {employees.map((e,idx)=>(
+                <TRow key={e.id} alt={idx%2}>
+                  <TD color={C.accent}>{e.id}</TD>
+                  <TD><span style={{ fontWeight:700 }}>{e.name}</span></TD>
+                  <TD color={C.textDim}>{e.position||"—"}</TD>
+                  <TD mono color={C.green}>{fmt(e.baseSalary)}</TD>
+                  <TD color={C.textMuted}>{e.phone||"—"}</TD>
+                  <TD color={C.textMuted}>{e.startDate}</TD>
+                  <TD color={C.textMuted}>{e.notes||"—"}</TD>
+                  <td style={{ padding:"11px 14px" }}>
+                    <button onClick={()=>setConfirm({ msg:`حذف الموظف "${e.name}"؟`, onConfirm:()=>saveEmp(employees.filter(x=>x.id!==e.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                  </td>
+                </TRow>
+              ))}
+            </tbody>
+          </table>
+          {employees.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا يوجد موظفون بعد</div>}
+        </Card>
+      )}
+      {/* Salaries Tab */}
+      {tab==="salaries" && (
+        <Card style={{ padding:0 }}>
+          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+            <THead cols={["رقم","الشهر","الموظف","الراتب الأساسي","مكافآت","خصومات","صافي المرتب","طريقة الدفع","ملاحظات"]} />
+            <tbody>
+              {salaries.map((s,idx)=>(
+                <TRow key={s.id} alt={idx%2}>
+                  <TD color={C.accent}>{s.id}</TD>
+                  <TD color={C.textDim}>{s.month}</TD>
+                  <TD><span style={{ fontWeight:600 }}>{s.employeeName}</span></TD>
+                  <TD mono>{fmt(s.baseSalary)}</TD>
+                  <TD mono color={C.green}>{s.bonus?fmt(s.bonus):"—"}</TD>
+                  <TD mono color={C.red}>{s.deductions?fmt(s.deductions):"—"}</TD>
+                  <TD mono color={C.accent}><span style={{ fontWeight:700 }}>{fmt(s.netSalary)}</span></TD>
+                  <TD color={s.paymentMethod==="شيك"?C.yellow:C.green}>{s.paymentMethod==="شيك"?"📄 شيك":"💵 نقدي"}</TD>
+                  <TD color={C.textMuted}>{s.notes||"—"}</TD>
+                </TRow>
+              ))}
+            </tbody>
+          </table>
+          {salaries.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد سجلات مرتبات</div>}
+        </Card>
+      )}
+      {/* Attendance Tab */}
+      {tab==="attendance" && (
+        <Card style={{ padding:0 }}>
+          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+            <THead cols={["رقم","التاريخ","الموظف","النوع","السبب",""]} />
+            <tbody>
+              {attendance.map((a,idx)=>(
+                <TRow key={a.id} alt={idx%2}>
+                  <TD color={C.accent}>{a.id}</TD>
+                  <TD color={C.textDim}>{a.date}</TD>
+                  <TD><span style={{ fontWeight:600 }}>{a.employeeName}</span></TD>
+                  <td style={{ padding:"11px 14px" }}>
+                    <span style={{ background:a.type==="غياب"?C.redDim:C.yellowDim,color:a.type==="غياب"?C.red:C.yellow,border:`1px solid ${a.type==="غياب"?C.red:C.yellow}33`,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>{a.type}</span>
+                  </td>
+                  <TD color={C.textMuted}>{a.reason||"—"}</TD>
+                  <td style={{ padding:"11px 14px" }}>
+                    <button onClick={()=>setConfirm({ msg:"حذف هذا السجل؟", onConfirm:()=>saveAtt(attendance.filter(x=>x.id!==a.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                  </td>
+                </TRow>
+              ))}
+            </tbody>
+          </table>
+          {attendance.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد سجلات غياب أو إجازات</div>}
+        </Card>
+      )}
+      {/* Advances Tab */}
+      {tab==="advances" && (
+        <Card style={{ padding:0 }}>
+          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+            <THead cols={["رقم","التاريخ","الموظف","المبلغ","السبب","الحالة",""]} />
+            <tbody>
+              {advances.map((a,idx)=>(
+                <TRow key={a.id} alt={idx%2}>
+                  <TD color={C.accent}>{a.id}</TD>
+                  <TD color={C.textDim}>{a.date}</TD>
+                  <TD><span style={{ fontWeight:600 }}>{a.employeeName}</span></TD>
+                  <TD mono color={C.red}>{fmt(a.amount)}</TD>
+                  <TD color={C.textMuted}>{a.reason||"—"}</TD>
+                  <td style={{ padding:"11px 14px" }}>
+                    <span style={{ background:a.status==="مسدد"?C.greenDim:C.yellowDim,color:a.status==="مسدد"?C.green:C.yellow,border:`1px solid ${a.status==="مسدد"?C.green:C.yellow}33`,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>{a.status}</span>
+                  </td>
+                  <td style={{ padding:"11px 14px" }}>
+                    <div style={{ display:"flex",gap:6 }}>
+                      {a.status!=="مسدد" && <button onClick={()=>saveAdv(advances.map(x=>x.id===a.id?{...x,status:"مسدد"}:x))} style={{ background:C.greenDim,border:`1px solid ${C.green}33`,borderRadius:6,padding:"3px 10px",fontSize:11,color:C.green,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>مسدد</button>}
+                      <button onClick={()=>setConfirm({ msg:"حذف هذه السلفة؟", onConfirm:()=>saveAdv(advances.filter(x=>x.id!==a.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                    </div>
+                  </td>
+                </TRow>
+              ))}
+            </tbody>
+          </table>
+          {advances.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد سلف</div>}
+        </Card>
+      )}
+      {/* Modals */}
+      {showModal && modalType==="employee" && (
+        <Modal title="إضافة موظف جديد" onClose={()=>setShowModal(false)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Inp label="الاسم الكامل" value={empForm.name} onChange={v=>setEmpForm({...empForm,name:v})} required />
+              <Inp label="المنصب الوظيفي" value={empForm.position} onChange={v=>setEmpForm({...empForm,position:v})} />
+              <Inp label="الراتب الأساسي (ج.م)" type="number" value={empForm.baseSalary} onChange={v=>setEmpForm({...empForm,baseSalary:v})} />
+              <Inp label="رقم الهاتف" value={empForm.phone} onChange={v=>setEmpForm({...empForm,phone:v})} />
+              <Inp label="تاريخ التعيين" type="date" value={empForm.startDate} onChange={v=>setEmpForm({...empForm,startDate:v})} />
+            </div>
+            <Inp label="ملاحظات" value={empForm.notes} onChange={v=>setEmpForm({...empForm,notes:v})} />
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
+              <Btn onClick={handleSaveEmployee}>إضافة الموظف</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showModal && modalType==="salary" && (
+        <Modal title="صرف مرتب" onClose={()=>setShowModal(false)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Sel label="الموظف" value={salForm.employeeId} onChange={v=>{ const e=employees.find(x=>x.id===v); setSalForm({...salForm,employeeId:v,baseSalary:e?.baseSalary||""}); }} options={employees.map(e=>({value:e.id,label:e.name}))} />
+              <Inp label="الشهر" type="month" value={salForm.month} onChange={v=>setSalForm({...salForm,month:v})} />
+              <Inp label="الراتب الأساسي (ج.م)" type="number" value={salForm.baseSalary} onChange={v=>setSalForm({...salForm,baseSalary:v})} />
+              <Inp label="مكافآت (ج.م)" type="number" value={salForm.bonus} onChange={v=>setSalForm({...salForm,bonus:v})} placeholder="0" />
+              <Inp label="خصومات (ج.م)" type="number" value={salForm.deductions} onChange={v=>setSalForm({...salForm,deductions:v})} placeholder="0" />
+              <Sel label="طريقة الدفع" value={salForm.paymentMethod} onChange={v=>setSalForm({...salForm,paymentMethod:v})} options={[{value:"نقدي",label:"💵 نقدي"},{value:"شيك",label:"📄 شيك"},{value:"تحويل",label:"🏦 تحويل"}]} />
+            </div>
+            <div style={{ background:C.surface3,borderRadius:10,padding:"12px 16px",display:"flex",justifyContent:"space-between" }}>
+              <span style={{ color:C.textMuted,fontSize:13 }}>صافي المرتب</span>
+              <span style={{ color:C.green,fontWeight:800,fontSize:16,fontFamily:"monospace" }}>{fmt((parseFloat(salForm.baseSalary)||0)+(parseFloat(salForm.bonus)||0)-(parseFloat(salForm.deductions)||0))}</span>
+            </div>
+            <Inp label="ملاحظات" value={salForm.notes} onChange={v=>setSalForm({...salForm,notes:v})} />
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
+              <Btn variant="success" onClick={handleSaveSalary}>صرف المرتب</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showModal && modalType==="attendance" && (
+        <Modal title="تسجيل غياب / إجازة" onClose={()=>setShowModal(false)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Sel label="الموظف" value={attForm.employeeId} onChange={v=>setAttForm({...attForm,employeeId:v})} options={employees.map(e=>({value:e.id,label:e.name}))} />
+              <Inp label="التاريخ" type="date" value={attForm.date} onChange={v=>setAttForm({...attForm,date:v})} />
+              <Sel label="النوع" value={attForm.type} onChange={v=>setAttForm({...attForm,type:v})} options={[{value:"غياب",label:"🔴 غياب"},{value:"إجازة",label:"🟡 إجازة"},{value:"تأخر",label:"🟠 تأخر"}]} />
+            </div>
+            <Inp label="السبب" value={attForm.reason} onChange={v=>setAttForm({...attForm,reason:v})} placeholder="سبب الغياب أو الإجازة..." />
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
+              <Btn variant="yellow" onClick={handleSaveAttendance}>تسجيل</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showModal && modalType==="advance" && (
+        <Modal title="سلفة جديدة" onClose={()=>setShowModal(false)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Sel label="الموظف" value={advForm.employeeId} onChange={v=>setAdvForm({...advForm,employeeId:v})} options={employees.map(e=>({value:e.id,label:e.name}))} />
+              <Inp label="التاريخ" type="date" value={advForm.date} onChange={v=>setAdvForm({...advForm,date:v})} />
+              <Inp label="المبلغ (ج.م)" type="number" value={advForm.amount} onChange={v=>setAdvForm({...advForm,amount:v})} required />
+            </div>
+            <Inp label="السبب" value={advForm.reason} onChange={v=>setAdvForm({...advForm,reason:v})} placeholder="سبب السلفة..." />
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
+              <Btn variant="purple" onClick={handleSaveAdvance}>منح السلفة</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {confirm && <ConfirmDialog message={confirm.msg} onConfirm={()=>{ confirm.onConfirm(); setConfirm(null); }} onCancel={()=>setConfirm(null)} />}
+    </div>
+  );
+}
+
+
+// ─── EXPENSES PAGE ────────────────────────────────────────────────────────────
+function ExpensesPage() {
+  const [expenses, setExpenses] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("expenses_local")||"[]"); } catch { return []; }
+  });
+  const [showModal, setShowModal] = useState(false);
+  const [confirm, setConfirm] = useState(null);
+  const [filter, setFilter] = useState("");
+  const [monthFilter, setMonthFilter] = useState("");
+  const [form, setForm] = useState({ date:today(), description:"", category:"إيجار", amount:"", paymentMethod:"نقدي", notes:"" });
+
+  const expenseCategories = ["إيجار","كهرباء","مياه","غاز","إنترنت","تأمين","صيانة","مواصلات","تسويق","قرطاسية","رسوم قانونية","ضرائب","أخرى"];
+
+  const save = (list) => {
+    setExpenses(list);
+    localStorage.setItem("expenses_local", JSON.stringify(list));
+  };
+
+  const handleSave = () => {
+    if (!form.description.trim()||!form.amount) return;
+    const rec = { id:"EXP"+Date.now().toString().slice(-5), ...form, amount:parseFloat(form.amount)||0 };
+    save([...expenses, rec]);
+    setShowModal(false);
+    setForm({ date:today(), description:"", category:"إيجار", amount:"", paymentMethod:"نقدي", notes:"" });
+  };
+
+  const filtered = expenses.filter(e=>{
+    const matchFilter = !filter || e.description?.includes(filter) || e.category?.includes(filter);
+    const matchMonth = !monthFilter || e.date?.startsWith(monthFilter);
+    return matchFilter && matchMonth;
+  });
+
+  const totalExpenses = filtered.reduce((s,e)=>s+e.amount,0);
+  const byCategory = {};
+  filtered.forEach(e=>{ byCategory[e.category]=(byCategory[e.category]||0)+e.amount; });
+  const months = [...new Set(expenses.map(e=>e.date?.slice(0,7)))].filter(Boolean).sort().reverse();
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+      {confirm && <ConfirmDialog message={confirm.msg} onConfirm={()=>{ save(expenses.filter(e=>e.id!==confirm.id)); setConfirm(null); }} onCancel={()=>setConfirm(null)} />}
+      <PageHeader title="المصروفات" icon={I.revenue} subtitle={`${filtered.length} مصروف — إجمالي ${fmt(totalExpenses)}`}
+        action={<Btn onClick={()=>setShowModal(true)}><Ic d={I.plus} s={14} />إضافة مصروف</Btn>} />
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
+        <MiniStat label="إجمالي المصروفات" value={fmt(totalExpenses)} color={C.red} icon={I.revenue} />
+        <MiniStat label="نقدي" value={fmt(filtered.filter(e=>e.paymentMethod==="نقدي").reduce((s,e)=>s+e.amount,0))} color={C.green} icon={I.chartBar} />
+        <MiniStat label="شيكات" value={fmt(filtered.filter(e=>e.paymentMethod==="شيك").reduce((s,e)=>s+e.amount,0))} color={C.yellow} icon={I.tax} />
+        <MiniStat label="عدد الأصناف" value={Object.keys(byCategory).length} color={C.accent} icon={I.categories} />
+      </div>
+      {Object.keys(byCategory).length > 0 && (
+        <Card>
+          <h3 style={{ margin:"0 0 14px",fontSize:14,fontWeight:700,color:C.text }}>توزيع المصروفات حسب الفئة</h3>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8 }}>
+            {Object.entries(byCategory).sort((a,b)=>b[1]-a[1]).map(([cat,val])=>(
+              <div key={cat} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <span style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{cat}</span>
+                <span style={{ fontSize:13,color:C.red,fontFamily:"monospace",fontWeight:700 }}>{fmt(val)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      <Card style={{ padding:0 }}>
+        <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
+          <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="ابحث..." style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none",width:200 }} />
+          <select value={monthFilter} onChange={e=>setMonthFilter(e.target.value)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
+            <option value="">كل الأشهر</option>
+            {months.map(m=><option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <table style={{ width:"100%",borderCollapse:"collapse" }}>
+          <THead cols={["رقم","التاريخ","الوصف","الفئة","المبلغ","طريقة الدفع","ملاحظات",""]} />
+          <tbody>
+            {filtered.map((e,idx)=>(
+              <TRow key={e.id} alt={idx%2}>
+                <TD color={C.accent}>{e.id}</TD>
+                <TD color={C.textDim}>{e.date}</TD>
+                <TD><span style={{ fontWeight:600 }}>{e.description}</span></TD>
+                <TD><span style={{ background:C.surface3,padding:"2px 8px",borderRadius:6,fontSize:11,color:C.textDim }}>{e.category}</span></TD>
+                <TD mono color={C.red}><span style={{ fontWeight:700 }}>{fmt(e.amount)}</span></TD>
+                <TD color={e.paymentMethod==="شيك"?C.yellow:C.green}>{e.paymentMethod==="شيك"?"📄 شيك":"💵 نقدي"}</TD>
+                <TD color={C.textMuted}>{e.notes||"—"}</TD>
+                <td style={{ padding:"11px 14px" }}>
+                  <button onClick={()=>setConfirm({ id:e.id,msg:`حذف "${e.description}"؟` })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                </td>
+              </TRow>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد مصروفات</div>}
+      </Card>
+      {showModal && (
+        <Modal title="إضافة مصروف" onClose={()=>setShowModal(false)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Inp label="التاريخ" type="date" value={form.date} onChange={v=>setForm({...form,date:v})} />
+              <Inp label="الوصف" value={form.description} onChange={v=>setForm({...form,description:v})} required />
+              <Sel label="الفئة" value={form.category} onChange={v=>setForm({...form,category:v})} options={expenseCategories} />
+              <Inp label="المبلغ (ج.م)" type="number" value={form.amount} onChange={v=>setForm({...form,amount:v})} required />
+              <Sel label="طريقة الدفع" value={form.paymentMethod} onChange={v=>setForm({...form,paymentMethod:v})} options={[{value:"نقدي",label:"💵 نقدي"},{value:"شيك",label:"📄 شيك"},{value:"تحويل",label:"🏦 تحويل"}]} />
+            </div>
+            <Inp label="ملاحظات" value={form.notes} onChange={v=>setForm({...form,notes:v})} placeholder="أي ملاحظات..." />
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
+              <Btn onClick={handleSave}>حفظ المصروف</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+
+// ─── PRODUCTION COST PAGE ─────────────────────────────────────────────────────
+function ProductionCostPage({ data, actions }) {
+  const [showModal, setShowModal] = useState(false);
+  const [productions, setProductions] = useState([]);
+  const [form, setForm] = useState({ date: today(), productName:"", quantity:1, unit:"قطعة", notes:"" });
+  const [materials, setMaterials] = useState([{ name:"", qty:1, unit:"قطعة", cost:0 }]);
+  const [laborCost, setLaborCost] = useState(0);
+  const [overheadCost, setOverheadCost] = useState(0);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("productions_" + "local");
+    if (stored) try { setProductions(JSON.parse(stored)); } catch {}
+  }, []);
+
+  const saveProductions = (list) => {
+    setProductions(list);
+    localStorage.setItem("productions_local", JSON.stringify(list));
+  };
+
+  const addMaterial = () => setMaterials([...materials, { name:"", qty:1, unit:"قطعة", cost:0 }]);
+  const removeMaterial = (i) => setMaterials(materials.filter((_,idx)=>idx!==i));
+  const updateMaterial = (i,field,val) => setMaterials(materials.map((m,idx)=>idx===i?{...m,[field]:val}:m));
+
+  const materialsCost = materials.reduce((s,m)=>(s+(parseFloat(m.qty)||0)*(parseFloat(m.cost)||0)),0);
+  const totalCost = materialsCost + (parseFloat(laborCost)||0) + (parseFloat(overheadCost)||0);
+  const costPerUnit = form.quantity > 0 ? totalCost / (parseFloat(form.quantity)||1) : 0;
+
+  const handleSave = () => {
+    if (!form.productName.trim()) return;
+    const record = {
+      id: "PRD" + Date.now().toString().slice(-5),
+      date: form.date,
+      productName: form.productName,
+      quantity: parseFloat(form.quantity)||1,
+      unit: form.unit,
+      materials: materials.filter(m=>m.name.trim()),
+      materialsCost: Math.round(materialsCost),
+      laborCost: parseFloat(laborCost)||0,
+      overheadCost: parseFloat(overheadCost)||0,
+      totalCost: Math.round(totalCost),
+      costPerUnit: Math.round(costPerUnit),
+      notes: form.notes,
+    };
+    saveProductions([...productions, record]);
+    setShowModal(false);
+    setForm({ date:today(), productName:"", quantity:1, unit:"قطعة", notes:"" });
+    setMaterials([{ name:"", qty:1, unit:"قطعة", cost:0 }]);
+    setLaborCost(0); setOverheadCost(0);
+  };
+
+  const deleteProduction = (id) => saveProductions(productions.filter(p=>p.id!==id));
+
+  const totalAllCost = productions.reduce((s,p)=>s+p.totalCost,0);
+  const totalMaterials = productions.reduce((s,p)=>s+p.materialsCost,0);
+  const totalLabor = productions.reduce((s,p)=>s+p.laborCost,0);
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+      <PageHeader title="تكلفة الإنتاج" icon={I.chartBar} subtitle={`${productions.length} دفعة إنتاجية`}
+        action={<Btn onClick={()=>setShowModal(true)}><Ic d={I.plus} s={14} />إضافة دفعة إنتاج</Btn>} />
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
+        <MiniStat label="إجمالي التكاليف" value={fmt(totalAllCost)} color={C.red} icon={I.revenue} />
+        <MiniStat label="تكلفة المواد" value={fmt(totalMaterials)} color={C.yellow} icon={I.box} />
+        <MiniStat label="تكلفة العمالة" value={fmt(totalLabor)} color={C.blue} icon={I.clients} />
+        <MiniStat label="عدد الدفعات" value={productions.length} color={C.accent} icon={I.chartBar} />
+      </div>
+      <Card style={{ padding:0 }}>
+        <table style={{ width:"100%",borderCollapse:"collapse" }}>
+          <THead cols={["رقم","التاريخ","المنتج","الكمية","تكلفة المواد","العمالة","المصاريف","إجمالي التكلفة","تكلفة الوحدة",""]} />
+          <tbody>
+            {productions.map((p,idx)=>(
+              <TRow key={p.id} alt={idx%2}>
+                <TD color={C.accent}>{p.id}</TD>
+                <TD color={C.textDim}>{p.date}</TD>
+                <TD><span style={{ fontWeight:700 }}>{p.productName}</span></TD>
+                <TD mono color={C.text}>{p.quantity} {p.unit}</TD>
+                <TD mono color={C.yellow}>{fmt(p.materialsCost)}</TD>
+                <TD mono color={C.blue}>{fmt(p.laborCost)}</TD>
+                <TD mono color={C.purple}>{fmt(p.overheadCost)}</TD>
+                <TD mono color={C.red}><span style={{ fontWeight:700 }}>{fmt(p.totalCost)}</span></TD>
+                <TD mono color={C.green}>{fmt(p.costPerUnit)}</TD>
+                <td style={{ padding:"11px 14px" }}>
+                  <button onClick={()=>deleteProduction(p.id)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                </td>
+              </TRow>
+            ))}
+          </tbody>
+        </table>
+        {productions.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد دفعات إنتاجية بعد</div>}
+      </Card>
+      {showModal && (
+        <Modal title="إضافة دفعة إنتاج" onClose={()=>setShowModal(false)} wide>
+          <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12 }}>
+              <Inp label="التاريخ" type="date" value={form.date} onChange={v=>setForm({...form,date:v})} />
+              <Inp label="اسم المنتج" value={form.productName} onChange={v=>setForm({...form,productName:v})} required />
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                <Inp label="الكمية المنتجة" type="number" value={form.quantity} onChange={v=>setForm({...form,quantity:v})} />
+                <Inp label="الوحدة" value={form.unit} onChange={v=>setForm({...form,unit:v})} />
+              </div>
+            </div>
+            <div>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                <label style={{ fontSize:13,fontWeight:600,color:C.textDim }}>المواد الخام</label>
+                <Btn small onClick={addMaterial}><Ic d={I.plus} s={12} />إضافة مادة</Btn>
+              </div>
+              <div style={{ background:C.surface2,borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}` }}>
+                <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                  <THead cols={["المادة","الكمية","الوحدة","تكلفة الوحدة","الإجمالي",""]} />
+                  <tbody>
+                    {materials.map((m,i)=>(
+                      <TRow key={i} alt={i%2}>
+                        <td style={{ padding:"6px 10px" }}><input value={m.name} onChange={e=>updateMaterial(i,"name",e.target.value)} placeholder="اسم المادة" style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:"100%" }} /></td>
+                        <td style={{ padding:"6px 10px" }}><input type="number" value={m.qty} onChange={e=>updateMaterial(i,"qty",e.target.value)} style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:60 }} /></td>
+                        <td style={{ padding:"6px 10px" }}><input value={m.unit} onChange={e=>updateMaterial(i,"unit",e.target.value)} style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:60 }} /></td>
+                        <td style={{ padding:"6px 10px" }}><input type="number" value={m.cost} onChange={e=>updateMaterial(i,"cost",e.target.value)} style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:80 }} /></td>
+                        <TD mono color={C.accent}>{fmt((parseFloat(m.qty)||0)*(parseFloat(m.cost)||0))}</TD>
+                        <td style={{ padding:"6px 10px" }}><button onClick={()=>removeMaterial(i)} style={{ background:"none",border:"none",cursor:"pointer",color:C.red }}><Ic d={I.trash} s={14} /></button></td>
+                      </TRow>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Inp label="تكلفة العمالة (ج.م)" type="number" value={laborCost} onChange={setLaborCost} placeholder="0" />
+              <Inp label="مصاريف عامة (ج.م)" type="number" value={overheadCost} onChange={setOverheadCost} placeholder="0" />
+            </div>
+            <div style={{ background:C.surface3,borderRadius:12,padding:"14px 18px",display:"flex",flexDirection:"column",gap:8 }}>
+              {[
+                { label:"تكلفة المواد", val:fmt(materialsCost), color:C.yellow },
+                { label:"تكلفة العمالة", val:fmt(parseFloat(laborCost)||0), color:C.blue },
+                { label:"مصاريف عامة", val:fmt(parseFloat(overheadCost)||0), color:C.purple },
+                { label:"إجمالي التكلفة", val:fmt(totalCost), color:C.red, bold:true },
+                { label:`تكلفة الوحدة (${form.unit})`, val:fmt(costPerUnit), color:C.green, bold:true },
+              ].map(r=>(
+                <div key={r.label} style={{ display:"flex",justifyContent:"space-between",fontSize:r.bold?14:12,borderTop:r.bold?`1px solid ${C.border}`:"none",paddingTop:r.bold?8:0 }}>
+                  <span style={{ color:C.textMuted,fontWeight:r.bold?700:400 }}>{r.label}</span>
+                  <span style={{ color:r.color,fontWeight:700,fontFamily:"monospace" }}>{r.val}</span>
+                </div>
+              ))}
+            </div>
+            <Inp label="ملاحظات" value={form.notes} onChange={v=>setForm({...form,notes:v})} placeholder="أي ملاحظات..." />
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
+              <Btn onClick={handleSave}>حفظ دفعة الإنتاج</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2156,6 +3252,8 @@ export default function App() {
   const [userEmail, setUserEmail] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isActive, setIsActive] = useState(true);
+  const [subUser, setSubUser] = useState(null); // { id, owner_id, username, role, allowed_pages, can_add, can_delete, can_edit }
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const checkSubscription = async (uid) => {
     if (!uid) return;
@@ -2178,13 +3276,38 @@ export default function App() {
       const email = session?.user?.email ?? null;
       setUserId(uid); setUserEmail(email);
       if (uid) checkSubscription(uid);
+      if (!uid) setSubUser(null);
     });
     return () => subscription.unsubscribe();
   }, []);
 
   useEffect(()=>{ document.title = 'حسابي Pro'; }, []);
 
-  const { data, loading, actions } = useAppData(userId);
+  // For sub-users: we need to load data using the owner's userId
+  const effectiveUserId = subUser ? subUser.owner_id : userId;
+  const { data, loading, actions } = useAppData(effectiveUserId);
+
+  // Sub-user login: sign in with owner account silently isn't possible,
+  // so we load data from sub_users table directly using owner_id
+  // But we need auth session for supabase RLS — so sub-users use the owner's data via owner_id
+  // The sub_users table has owner_id; after sub-user validates, we need to load that owner's records
+  // Solution: after sub-user login, sign in with owner's credentials isn't possible client-side
+  // Instead: allow sub_users to access records with owner_id via RLS policy allowing select where owner_id = sub_user.owner_id
+  // For now, we store owner_id and use it, but RLS may block — we bypass with anon key policy
+  // The simplest working approach: keep the sub-user in state, use owner_id as userId for data hooks
+
+  // Handle sub-user login (called from LoginScreen)
+  const handleSubUserLogin = (su) => {
+    setSubUser(su);
+    // Navigate to first allowed page
+    const firstPage = su.allowed_pages?.[0] || "dash";
+    setPage(firstPage);
+  };
+
+  const handleSubUserLogout = () => {
+    setSubUser(null);
+    setPage("dash");
+  };
 
   if (authLoading) {
     return (
@@ -2195,51 +3318,110 @@ export default function App() {
     );
   }
 
-  if (!userId) return <LoginScreen />;
-  if (userEmail === ADMIN_EMAIL) return <AdminPanel />;
-  if (!isActive) return <SubscriptionExpired />;
+  // Sub-user is logged in (no supabase auth needed for display)
+  if (subUser) {
+    const allowedPages = subUser.allowed_pages || [];
+    const perms = { canAdd: subUser.can_add, canDelete: subUser.can_delete, canEdit: subUser.can_edit };
 
-  const navGroups = [
-    {
-      label: "الرئيسية",
-      items: [
-        { id:"dash", label:"الرئيسية", icon:I.dash },
-      ]
-    },
-    {
-      label: "المالية",
-      items: [
+    const navGroups = [
+      { label:"الرئيسية", items:[{ id:"dash", label:"الرئيسية", icon:I.dash }] },
+      { label:"المالية", items:[
         { id:"sales", label:"المبيعات", icon:I.sales },
         { id:"purchases", label:"المشتريات", icon:I.purchase },
         { id:"returns", label:"المرتجعات", icon:I.returns },
         { id:"revenue", label:"الإيرادات", icon:I.revenue },
+        { id:"expenses", label:"المصروفات", icon:I.revenue },
         { id:"taxinvoices", label:"الفواتير الضريبية", icon:I.tax },
-      ]
-    },
-    {
-      label: "الأطراف",
-      items: [
+      ]},
+      { label:"الأطراف", items:[
         { id:"clients", label:"العملاء", icon:I.clients },
         { id:"suppliers", label:"الموردين", icon:I.suppliers },
-      ]
-    },
-    {
-      label: "التقارير",
-      items: [
+      ]},
+      { label:"التقارير", items:[
         { id:"reports", label:"التقارير المالية", icon:I.report },
-        { id:"monthlyreports", label:"التقارير الشهرية", icon:I.calendar },
-      ]
-    },
-    {
-      label: "المخزون",
-      items: [
+        { id:"taxreports", label:"التقارير الضريبية", icon:I.tax },
+      ]},
+      { label:"الإنتاج", items:[
+        { id:"production", label:"تكلفة الإنتاج", icon:I.chartBar },
+        { id:"employees", label:"الموظفين", icon:I.clients },
+      ]},
+      { label:"المخزون", items:[
         { id:"inventory", label:"إدارة المخزون", icon:I.inventory },
-        { id:"stocktake", label:"الجرد الدوري", icon:I.stocktake },
+        { id:"stocktake", label:"الجرد الشهري", icon:I.stocktake },
         { id:"inventoryitems", label:"الأصناف", icon:I.box },
         { id:"categories", label:"الفئات", icon:I.categories },
-      ]
-    },
+      ]},
+    ].map(g=>({...g, items: g.items.filter(it=>allowedPages.includes(it.id))})).filter(g=>g.items.length>0);
+
+    // Restrict actions based on permissions
+    const restrictedActions = {
+      ...actions,
+      addSale: perms.canAdd ? actions.addSale : ()=>alert("ليس لديك صلاحية الإضافة"),
+      deleteSale: perms.canDelete ? actions.deleteSale : ()=>alert("ليس لديك صلاحية الحذف"),
+      addPurchase: perms.canAdd ? actions.addPurchase : ()=>alert("ليس لديك صلاحية الإضافة"),
+      deletePurchase: perms.canDelete ? actions.deletePurchase : ()=>alert("ليس لديك صلاحية الحذف"),
+      addReturn: perms.canAdd ? actions.addReturn : ()=>alert("ليس لديك صلاحية الإضافة"),
+      deleteReturn: perms.canDelete ? actions.deleteReturn : ()=>alert("ليس لديك صلاحية الحذف"),
+      addClient: perms.canAdd ? actions.addClient : ()=>alert("ليس لديك صلاحية الإضافة"),
+      deleteClient: perms.canDelete ? actions.deleteClient : ()=>alert("ليس لديك صلاحية الحذف"),
+      addSupplier: perms.canAdd ? actions.addSupplier : ()=>alert("ليس لديك صلاحية الإضافة"),
+      deleteSupplier: perms.canDelete ? actions.deleteSupplier : ()=>alert("ليس لديك صلاحية الحذف"),
+      addInventoryItem: perms.canAdd ? actions.addInventoryItem : ()=>alert("ليس لديك صلاحية الإضافة"),
+      updateInventoryItem: perms.canEdit ? actions.updateInventoryItem : ()=>alert("ليس لديك صلاحية التعديل"),
+      deleteInventoryItem: perms.canDelete ? actions.deleteInventoryItem : ()=>alert("ليس لديك صلاحية الحذف"),
+    };
+
+    return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={restrictedActions} loading={loading}
+      userEmail={subUser.display_name||subUser.username} onLogout={handleSubUserLogout}
+      roleBadge={<span style={{ background:C.purpleDim,color:C.purple,border:`1px solid ${C.purple}33`,borderRadius:20,padding:"2px 10px",fontSize:10,fontWeight:700 }}>{subUser.role}</span>}
+      sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}
+    />;
+  }
+
+  if (!userId) return <LoginScreen onSubUserLogin={handleSubUserLogin} />;
+  if (userEmail === ADMIN_EMAIL) return <AdminPanel />;
+  if (!isActive) return <SubscriptionExpired />;
+
+  const navGroups = [
+    { label:"الرئيسية", items:[{ id:"dash", label:"الرئيسية", icon:I.dash }] },
+    { label:"المالية", items:[
+      { id:"sales", label:"المبيعات", icon:I.sales },
+      { id:"purchases", label:"المشتريات", icon:I.purchase },
+      { id:"returns", label:"المرتجعات", icon:I.returns },
+      { id:"revenue", label:"الإيرادات", icon:I.revenue },
+      { id:"expenses", label:"المصروفات", icon:I.revenue },
+      { id:"taxinvoices", label:"الفواتير الضريبية", icon:I.tax },
+    ]},
+    { label:"الأطراف", items:[
+      { id:"clients", label:"العملاء", icon:I.clients },
+      { id:"suppliers", label:"الموردين", icon:I.suppliers },
+    ]},
+    { label:"التقارير", items:[
+      { id:"reports", label:"التقارير المالية", icon:I.report },
+      { id:"taxreports", label:"التقارير الضريبية", icon:I.tax },
+      { id:"taxinvoices", label:"الفواتير الضريبية", icon:I.tax },
+    ]},
+    { label:"الإنتاج والموارد", items:[
+      { id:"production", label:"تكلفة الإنتاج", icon:I.chartBar },
+      { id:"employees", label:"الموظفين", icon:I.clients },
+    ]},
+    { label:"المخزون", items:[
+      { id:"inventory", label:"إدارة المخزون", icon:I.inventory },
+      { id:"stocktake", label:"الجرد الشهري", icon:I.stocktake },
+      { id:"inventoryitems", label:"الأصناف", icon:I.box },
+      { id:"categories", label:"الفئات", icon:I.categories },
+    ]},
   ];
+
+  return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={actions} loading={loading}
+    userEmail={userEmail} onLogout={()=>supabase.auth.signOut()}
+    sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}
+  />;
+}
+
+// ─── APP SHELL (Sidebar + Content) ────────────────────────────────────────────
+function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail, onLogout, roleBadge, sidebarCollapsed, setSidebarCollapsed }) {
+  const W = sidebarCollapsed ? 68 : 230;
 
   const renderPage = () => {
     switch (page) {
@@ -2250,9 +3432,12 @@ export default function App() {
       case "suppliers": return <AccountStatement parties={data.suppliers} invoices={data.purchaseInvoices} type="supplier" onAddParty={actions.addSupplier} onDeleteParty={actions.deleteSupplier} />;
       case "returns": return <ReturnsPage returns={data.returns} salesInvoices={data.salesInvoices} purchaseInvoices={data.purchaseInvoices} clients={data.clients} suppliers={data.suppliers} onAdd={actions.addReturn} onDelete={actions.deleteReturn} />;
       case "revenue": return <RevenuePage data={data} onDeleteMonth={actions.deleteMonth} userEmail={userEmail} />;
-      case "reports": return <ReportsPage data={data} userEmail={userEmail} />;
-      case "monthlyreports": return <MonthlyReportsPage data={data} />;
+      case "reports": return <UnifiedReportsPage data={data} userEmail={userEmail} />;
+      case "taxreports": return <TaxReportsPage data={data} />;
       case "taxinvoices": return <TaxInvoicesPage salesInvoices={data.salesInvoices} purchaseInvoices={data.purchaseInvoices} />;
+      case "expenses": return <ExpensesPage />;
+      case "production": return <ProductionCostPage data={data} />;
+      case "employees": return <EmployeesPage />;
       case "inventory": return <InventoryPage inventory={data.inventory} categories={data.categories} onAdd={actions.addInventoryItem} onEdit={actions.updateInventoryItem} onDelete={actions.deleteInventoryItem} onBulkAdd={actions.bulkAddInventory} userEmail={userEmail} />;
       case "stocktake": return <StocktakePage inventory={data.inventory} categories={data.categories} />;
       case "inventoryitems": return <InventoryItemsPage inventory={data.inventory} categories={data.categories} />;
@@ -2261,66 +3446,416 @@ export default function App() {
     }
   };
 
-  const allNavItems = navGroups.flatMap(g=>g.items);
-
   return (
     <div style={{ minHeight:"100vh",background:C.bg,fontFamily:"'Cairo','Segoe UI',sans-serif",display:"flex",direction:"rtl" }}>
-      {/* Sidebar */}
-      <div style={{ width:220,background:C.surface,borderLeft:`1px solid ${C.border}`,display:"flex",flexDirection:"column",position:"fixed",top:0,right:0,height:"100vh",zIndex:100 }}>
-        {/* Logo */}
-        <div style={{ padding:"18px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12 }}>
-          <Logo size={34} />
-          <div>
-            <div style={{ fontSize:15,fontWeight:800,color:C.text,letterSpacing:-0.3 }}>حسابي Pro</div>
-            <div style={{ fontSize:10,color:C.textMuted,marginTop:1 }}>نظام محاسبة متكامل</div>
-          </div>
+      {/* ── Sidebar ── */}
+      <div style={{
+        width:W, background:C.surface, borderLeft:`1px solid ${C.border}`,
+        display:"flex", flexDirection:"column", position:"fixed", top:0, right:0,
+        height:"100vh", zIndex:100, transition:"width 0.25s cubic-bezier(0.4,0,0.2,1)",
+        overflow:"hidden",
+      }}>
+        {/* Logo area */}
+        <div style={{ padding:"16px 12px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10,minHeight:70,flexShrink:0 }}>
+          <div style={{ flexShrink:0 }}><Logo size={36} /></div>
+          {!sidebarCollapsed && (
+            <div style={{ overflow:"hidden",flex:1 }}>
+              <div style={{ fontSize:15,fontWeight:800,color:C.text,letterSpacing:-0.3,whiteSpace:"nowrap" }}>حسابي Pro</div>
+              <div style={{ fontSize:10,color:C.textMuted,marginTop:1,whiteSpace:"nowrap" }}>نظام محاسبة متكامل</div>
+            </div>
+          )}
+          <button onClick={()=>setSidebarCollapsed(p=>!p)} style={{
+            background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",
+            color:C.textMuted,padding:5,display:"flex",flexShrink:0,marginRight:"auto",transition:"all 0.2s",
+          }}>
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {sidebarCollapsed ? <path d="M9 18l6-6-6-6"/> : <path d="M15 18l-6-6 6-6"/>}
+            </svg>
+          </button>
         </div>
+
         {/* Nav */}
-        <nav style={{ flex:1,overflowY:"auto",padding:"12px 8px" }}>
+        <nav style={{ flex:1,overflowY:"auto",overflowX:"hidden",padding:"10px 6px",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent` }}>
+          <style>{`
+            nav::-webkit-scrollbar{width:4px}
+            nav::-webkit-scrollbar-track{background:transparent}
+            nav::-webkit-scrollbar-thumb{background:${C.border};border-radius:4px}
+            nav::-webkit-scrollbar-thumb:hover{background:${C.borderLight}}
+          `}</style>
           {navGroups.map(group=>(
-            <div key={group.label} style={{ marginBottom:16 }}>
-              <div style={{ padding:"0 10px",fontSize:9,fontWeight:800,color:C.textMuted,letterSpacing:1.2,textTransform:"uppercase",marginBottom:6 }}>{group.label}</div>
-              {group.items.map(item=>(
-                <button key={item.id} onClick={()=>setPage(item.id)} style={{
-                  width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:11,border:"none",cursor:"pointer",
-                  fontFamily:"inherit",fontSize:13,fontWeight:600,textAlign:"right",marginBottom:2,transition:"all 0.15s",
-                  background:page===item.id?C.accentDim:"transparent",
-                  color:page===item.id?C.accent:C.textMuted,
-                  borderRight:page===item.id?`3px solid ${C.accent}`:"3px solid transparent",
-                }}>
-                  <Ic d={item.icon} s={15} c={page===item.id?C.accent:C.textMuted} />
-                  {item.label}
-                </button>
-              ))}
+            <div key={group.label} style={{ marginBottom:sidebarCollapsed?8:14 }}>
+              {!sidebarCollapsed && (
+                <div style={{ padding:"0 10px",fontSize:9,fontWeight:800,color:C.textMuted,letterSpacing:1.5,textTransform:"uppercase",marginBottom:5,whiteSpace:"nowrap",opacity:0.7 }}>{group.label}</div>
+              )}
+              {sidebarCollapsed && <div style={{ height:1,background:C.border,margin:"4px 6px 6px" }} />}
+              {group.items.map(item=>{
+                const active = page===item.id;
+                return (
+                  <button key={item.id} onClick={()=>setPage(item.id)} title={sidebarCollapsed?item.label:""} style={{
+                    width:"100%",display:"flex",alignItems:"center",gap:sidebarCollapsed?0:10,
+                    padding:sidebarCollapsed?"10px 0":"9px 12px",borderRadius:11,border:"none",cursor:"pointer",
+                    fontFamily:"inherit",fontSize:12.5,fontWeight:600,textAlign:"right",marginBottom:2,
+                    transition:"all 0.15s",justifyContent:sidebarCollapsed?"center":"flex-start",
+                    background:active?C.accentDim:"transparent",
+                    color:active?C.accent:C.textMuted,
+                    borderRight:active?`3px solid ${C.accent}`:"3px solid transparent",
+                    position:"relative",
+                  }}>
+                    <Ic d={item.icon} s={15} c={active?C.accent:C.textMuted} />
+                    {!sidebarCollapsed && <span style={{ whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{item.label}</span>}
+                    {active && !sidebarCollapsed && (
+                      <div style={{ position:"absolute",left:8,width:6,height:6,borderRadius:"50%",background:C.accent,boxShadow:`0 0 6px ${C.accent}` }} />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </nav>
+
         {/* Footer */}
-        <div style={{ padding:"12px 8px",borderTop:`1px solid ${C.border}` }}>
-          {loading && <div style={{ fontSize:11,color:C.textMuted,textAlign:"center",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
-            <div style={{ width:6,height:6,borderRadius:"50%",background:C.accent,animation:"pulse 1s infinite" }} />
-            جاري المزامنة...
-          </div>}
-          <div style={{ padding:"8px 12px",marginBottom:6,borderRadius:10,background:C.surface2,display:"flex",alignItems:"center",gap:8 }}>
-            <div style={{ width:28,height:28,borderRadius:"50%",background:C.accentDim,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-              <span style={{ fontSize:12,fontWeight:700,color:C.accent }}>{userEmail?.[0]?.toUpperCase()}</span>
+        <div style={{ padding:"10px 6px",borderTop:`1px solid ${C.border}`,flexShrink:0 }}>
+          {loading && !sidebarCollapsed && (
+            <div style={{ fontSize:10,color:C.textMuted,textAlign:"center",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>
+              <div style={{ width:5,height:5,borderRadius:"50%",background:C.accent }} />
+              مزامنة...
             </div>
-            <div style={{ overflow:"hidden" }}>
-              <div style={{ fontSize:11,color:C.text,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{userEmail}</div>
+          )}
+          {/* User card */}
+          <div style={{ padding:sidebarCollapsed?"8px 0":"8px 10px",marginBottom:6,borderRadius:10,background:C.surface2,display:"flex",alignItems:"center",gap:8,justifyContent:sidebarCollapsed?"center":"flex-start" }}>
+            <div style={{ width:30,height:30,borderRadius:"50%",background:C.accentDim,border:`2px solid ${C.accent}33`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <span style={{ fontSize:12,fontWeight:800,color:C.accent }}>{userEmail?.[0]?.toUpperCase()}</span>
             </div>
+            {!sidebarCollapsed && (
+              <div style={{ overflow:"hidden",flex:1 }}>
+                <div style={{ fontSize:11,color:C.text,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{userEmail}</div>
+                {roleBadge && <div style={{ marginTop:3 }}>{roleBadge}</div>}
+              </div>
+            )}
           </div>
-          <button onClick={()=>supabase.auth.signOut()} style={{
-            width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,border:`1px solid ${C.red}33`,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
-            background:C.redDim,color:C.red,transition:"all 0.2s",
+          <button onClick={onLogout} title={sidebarCollapsed?"تسجيل الخروج":""} style={{
+            width:"100%",display:"flex",alignItems:"center",gap:sidebarCollapsed?0:8,
+            padding:sidebarCollapsed?"9px 0":"9px 12px",borderRadius:10,border:`1px solid ${C.red}33`,
+            cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
+            background:C.redDim,color:C.red,transition:"all 0.2s",justifyContent:sidebarCollapsed?"center":"flex-start",
           }}>
-            <Ic d={I.logout} s={14} c={C.red} />تسجيل الخروج
+            <Ic d={I.logout} s={14} c={C.red} />
+            {!sidebarCollapsed && "تسجيل الخروج"}
           </button>
         </div>
       </div>
-      {/* Main Content */}
-      <div style={{ flex:1,marginRight:220,padding:"28px 30px",minHeight:"100vh",overflowY:"auto" }}>
+
+      {/* ── Main Content ── */}
+      <div style={{ flex:1,marginRight:W,padding:"28px 30px",minHeight:"100vh",overflowY:"auto",transition:"margin-right 0.25s cubic-bezier(0.4,0,0.2,1)" }}>
         {renderPage()}
       </div>
     </div>
   );
 }
+// ─── TAX REPORTS PAGE ────────────────────────────────────────────────────────
+function TaxReportsPage({ data }) {
+  const [taxRules, setTaxRules] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tax_rules_local")||"[]"); } catch { return []; }
+  });
+  const [monthlyTaxReports, setMonthlyTaxReports] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("monthly_tax_reports")||"[]"); } catch { return []; }
+  });
+  const [selectedMonth, setSelectedMonth] = useState(today().slice(0,7));
+  const [showRuleModal, setShowRuleModal] = useState(false);
+  const [activeTab, setActiveTab] = useState("summary"); // summary | rules | archive
+  const [ruleForm, setRuleForm] = useState({
+    name:"", type:"نسبة مبيعات", rate:"", fixedAmount:"", base:"إجمالي المبيعات",
+    category:"", notes:"", entityType:"شركة", frequency:"شهري"
+  });
+
+  const taxTypes = [
+    { value:"نسبة مبيعات", label:"نسبة من المبيعات %" },
+    { value:"نسبة أرباح", label:"نسبة من صافي الربح %" },
+    { value:"قيمة مضافة", label:"ضريبة القيمة المضافة % (ع.ق)" },
+    { value:"دمغة", label:"ضريبة دمغة %" },
+    { value:"دخل", label:"ضريبة دخل %" },
+    { value:"عقارات", label:"ضريبة عقارات %" },
+    { value:"زراعية", label:"رسوم زراعية %" },
+    { value:"صناعية", label:"رسوم صناعية %" },
+    { value:"ثابتة شهرية", label:"رسم ثابت شهري (ج.م)" },
+    { value:"جمارك", label:"رسوم جمارك %" },
+  ];
+
+  const entityTypes = ["شركة","مصنع","مزرعة","متجر","مطعم","مقاول","فردي","آخر"];
+
+  const saveTaxRules = (list) => {
+    setTaxRules(list);
+    localStorage.setItem("tax_rules_local", JSON.stringify(list));
+  };
+
+  const handleSaveRule = () => {
+    if (!ruleForm.name.trim()) return;
+    const rec = {
+      id: "TAX"+Date.now().toString().slice(-5),
+      ...ruleForm,
+      rate: parseFloat(ruleForm.rate)||0,
+      fixedAmount: parseFloat(ruleForm.fixedAmount)||0,
+      createdAt: new Date().toISOString(),
+    };
+    saveTaxRules([...taxRules, rec]);
+    setShowRuleModal(false);
+    setRuleForm({ name:"", type:"نسبة مبيعات", rate:"", fixedAmount:"", base:"إجمالي المبيعات", category:"", notes:"", entityType:"شركة", frequency:"شهري" });
+  };
+
+  const deleteRule = (id) => saveTaxRules(taxRules.filter(r=>r.id!==id));
+
+  // Calculate taxes for selected month
+  const monthSales = data.salesInvoices.filter(i=>getMonth(i.date)===selectedMonth);
+  const monthPurchases = data.purchaseInvoices.filter(i=>getMonth(i.date)===selectedMonth);
+  const invoiceTax = monthSales.reduce((s,i)=>s+(i.taxAmount||0),0);
+  const totalSales = monthSales.reduce((s,i)=>s+i.amount,0);
+  const totalPurchases = monthPurchases.reduce((s,i)=>s+i.amount,0);
+  const netProfit = totalSales - totalPurchases;
+
+  const getBase = (rule) => {
+    if (rule.base==="صافي الربح") return netProfit;
+    if (rule.base==="إجمالي المشتريات") return totalPurchases;
+    return totalSales; // default: إجمالي المبيعات
+  };
+
+  const calcTax = (rule) => {
+    if (rule.type==="ثابتة شهرية") return rule.fixedAmount||0;
+    const base = getBase(rule);
+    return base * (rule.rate||0) / 100;
+  };
+
+  const taxSummary = taxRules.filter(r=>r.frequency==="شهري"||r.frequency==="كل فاتورة").map(r=>({
+    ...r, calculatedAmount: calcTax(r)
+  }));
+
+  const totalCustomTax = taxSummary.reduce((s,r)=>s+r.calculatedAmount,0);
+  const grandTotalTax = invoiceTax + totalCustomTax;
+
+  const allMonths = [...new Set([
+    ...data.salesInvoices.map(i=>getMonth(i.date)),
+    today().slice(0,7),
+  ])].filter(Boolean).sort().reverse();
+
+  const saveMonthlyTaxReport = () => {
+    const report = {
+      month: selectedMonth,
+      closedAt: new Date().toISOString(),
+      invoiceTax, totalCustomTax, grandTotalTax,
+      totalSales, totalPurchases, netProfit,
+      rules: taxSummary,
+    };
+    const updated = [...monthlyTaxReports.filter(r=>r.month!==selectedMonth), report];
+    setMonthlyTaxReports(updated);
+    localStorage.setItem("monthly_tax_reports", JSON.stringify(updated));
+    // Print
+    printTaxMonthReport(report, selectedMonth);
+  };
+
+  const printTaxMonthReport = (report, month) => {
+    const [y,m] = month.split("-");
+    const label = new Date(+y,+m-1,1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"});
+    const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>تقرير ضريبي ${month}</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Cairo','Segoe UI',sans-serif;background:#fff;color:#1a1a2e;padding:36px 40px}
+    .header{text-align:center;padding-bottom:18px;border-bottom:3px solid #f59e0b;margin-bottom:24px}
+    .logo{font-size:24px;font-weight:900;color:#f59e0b}.stamp{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:6px 18px;display:inline-block;margin-top:10px;font-size:12px;color:#92400e;font-weight:700}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+    .stat{border-radius:10px;padding:14px 16px;border:1px solid #e2e8f0;text-align:center}
+    .stat-v{font-size:17px;font-weight:800;font-family:monospace}.stat-l{font-size:10px;color:#64748b;margin-top:3px}
+    table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:12px}
+    thead tr{background:#f59e0b;color:#fff}thead th{padding:9px 12px;font-weight:700;text-align:right}
+    tbody tr:nth-child(even){background:#fffbeb}tbody td{padding:9px 12px;border-bottom:1px solid #e2e8f0}
+    .total{background:#fef3c7;font-weight:800;font-size:13px}
+    .footer{margin-top:24px;text-align:center;font-size:10px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:14px}
+    @media print{body{padding:16px}}</style></head><body>
+    <div class="header"><div class="logo">📊 التقرير الضريبي الشهري</div><div style="font-size:12px;color:#64748b;margin-top:4px">حسابي Pro</div>
+    <div class="stamp">📅 ${label}</div></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-v" style="color:#34d399">${report.totalSales.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">إجمالي المبيعات</div></div>
+      <div class="stat"><div class="stat-v" style="color:#f87171">${report.totalPurchases.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">إجمالي المشتريات</div></div>
+      <div class="stat"><div class="stat-v" style="color:${report.netProfit>=0?"#34d399":"#f87171"}">${report.netProfit.toLocaleString("ar-EG")} ج.م</div><div class="stat-l">صافي الربح</div></div>
+    </div>
+    <table><thead><tr><th>اسم الضريبة</th><th>النوع</th><th>النسبة/المبلغ</th><th>الأساس</th><th>المبلغ المحسوب</th></tr></thead><tbody>
+    <tr><td>ضريبة القيمة المضافة على الفواتير</td><td>ع.ق فواتير</td><td>—</td><td>الفواتير</td><td>${report.invoiceTax.toLocaleString("ar-EG")} ج.م</td></tr>
+    ${report.rules.map(r=>`<tr><td>${r.name}</td><td>${r.type}</td><td>${r.type==="ثابتة شهرية"?r.fixedAmount.toLocaleString("ar-EG")+" ج.م":r.rate+"%"}</td><td>${r.base||"—"}</td><td>${r.calculatedAmount.toLocaleString("ar-EG")} ج.م</td></tr>`).join("")}
+    <tr class="total"><td colspan="4">إجمالي الضرائب المستحقة</td><td style="color:#f59e0b">${report.grandTotalTax.toLocaleString("ar-EG")} ج.م</td></tr>
+    </tbody></table>
+    <div class="footer">تقرير ضريبي شهري — حسابي Pro — ${new Date().toLocaleString("ar-EG")}</div></body></html>`;
+    const w = window.open("","_blank");
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(()=>w.print(),500);
+  };
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+      <PageHeader title="التقارير الضريبية" icon={I.tax} subtitle="إدارة الضرائب الشهرية لجميع أنواع المنشآت"
+        action={
+          <div style={{ display:"flex",gap:8 }}>
+            {activeTab==="summary" && <Btn variant="yellow" onClick={saveMonthlyTaxReport}><Ic d={I.download} s={14} />حفظ وطباعة التقرير</Btn>}
+            {activeTab==="rules" && <Btn onClick={()=>setShowRuleModal(true)}><Ic d={I.plus} s={14} />إضافة ضريبة</Btn>}
+          </div>
+        }
+      />
+      {/* Tabs */}
+      <div style={{ display:"flex",background:C.surface2,borderRadius:12,padding:4,border:`1px solid ${C.border}`,gap:4 }}>
+        {[{id:"summary",label:"📊 ملخص الشهر"},{id:"rules",label:"⚙️ قواعد الضرائب"},{id:"archive",label:"🗂 الأرشيف"}].map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{ flex:1,background:activeTab===t.id?C.yellow:"transparent",color:activeTab===t.id?"#1a1a2e":C.textMuted,border:"none",borderRadius:9,padding:"10px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* SUMMARY TAB */}
+      {activeTab==="summary" && (
+        <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+          <div style={{ display:"flex",gap:10,alignItems:"center" }}>
+            <select value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
+              style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}>
+              {allMonths.map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
+            <MiniStat label="إجمالي المبيعات" value={fmt(totalSales)} color={C.green} icon={I.sales} />
+            <MiniStat label="صافي الربح" value={fmt(netProfit)} color={netProfit>=0?C.green:C.red} icon={I.chartBar} />
+            <MiniStat label="ض.ق.م الفواتير" value={fmt(invoiceTax)} color={C.yellow} icon={I.tax} />
+            <MiniStat label="إجمالي الضرائب" value={fmt(grandTotalTax)} color={C.yellow} icon={I.tax} />
+          </div>
+          <Card style={{ padding:0 }}>
+            <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>تفاصيل الضرائب — {selectedMonth}</div>
+            <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <THead cols={["اسم الضريبة","النوع","نوع المنشأة","النسبة/المبلغ","الأساس","المبلغ المحسوب"]} />
+              <tbody>
+                <TRow alt={false}>
+                  <TD><span style={{ fontWeight:600 }}>ضريبة القيمة المضافة (ع.ق) من الفواتير</span></TD>
+                  <TD color={C.yellow}>ع.ق فواتير</TD>
+                  <TD color={C.textMuted}>—</TD>
+                  <TD mono color={C.yellow}>من الفواتير</TD>
+                  <TD color={C.textMuted}>الفواتير</TD>
+                  <TD mono color={C.yellow}><span style={{ fontWeight:700 }}>{fmt(invoiceTax)}</span></TD>
+                </TRow>
+                {taxSummary.map((r,i)=>(
+                  <TRow key={r.id} alt={(i+1)%2}>
+                    <TD><span style={{ fontWeight:600 }}>{r.name}</span></TD>
+                    <TD color={C.yellow}>{r.type}</TD>
+                    <TD color={C.textMuted}>{r.entityType}</TD>
+                    <TD mono color={C.accent}>{r.type==="ثابتة شهرية"?fmt(r.fixedAmount):`${r.rate}%`}</TD>
+                    <TD color={C.textMuted}>{r.base||"—"}</TD>
+                    <TD mono color={C.yellow}><span style={{ fontWeight:700 }}>{fmt(r.calculatedAmount)}</span></TD>
+                  </TRow>
+                ))}
+                {/* Total Row */}
+                <tr style={{ background:C.yellowDim,borderTop:`2px solid ${C.yellow}44` }}>
+                  <td colSpan={5} style={{ padding:"12px 14px",fontSize:14,fontWeight:800,color:C.yellow }}>إجمالي الضرائب المستحقة للشهر</td>
+                  <td style={{ padding:"12px 14px",fontSize:16,fontWeight:900,color:C.yellow,fontFamily:"monospace" }}>{fmt(grandTotalTax)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {/* RULES TAB */}
+      {activeTab==="rules" && (
+        <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+          <Card>
+            <p style={{ margin:0,fontSize:12,color:C.textMuted,lineHeight:1.8 }}>
+              قم بإضافة الضرائب والرسوم الخاصة بمنشأتك (مصنع، شركة، مزرعة، إلخ). سيتم حسابها تلقائياً كل شهر بناءً على بيانات المبيعات والأرباح.
+            </p>
+          </Card>
+          {taxRules.length===0 ? (
+            <Card style={{ textAlign:"center",padding:40 }}>
+              <div style={{ color:C.textMuted,fontSize:13 }}>لم تُضف قواعد ضريبية بعد. اضغط "إضافة ضريبة" للبدء.</div>
+            </Card>
+          ) : (
+            <Card style={{ padding:0 }}>
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <THead cols={["الاسم","النوع","نوع المنشأة","النسبة","الأساس","الدورية","ملاحظات",""]} />
+                <tbody>
+                  {taxRules.map((r,i)=>(
+                    <TRow key={r.id} alt={i%2}>
+                      <TD><span style={{ fontWeight:700 }}>{r.name}</span></TD>
+                      <TD color={C.yellow}>{r.type}</TD>
+                      <TD color={C.textDim}>{r.entityType}</TD>
+                      <TD mono color={C.accent}>{r.type==="ثابتة شهرية"?fmt(r.fixedAmount):`${r.rate}%`}</TD>
+                      <TD color={C.textMuted}>{r.base||"—"}</TD>
+                      <TD color={C.textDim}>{r.frequency}</TD>
+                      <TD color={C.textMuted}>{r.notes||"—"}</TD>
+                      <td style={{ padding:"11px 14px" }}>
+                        <button onClick={()=>deleteRule(r.id)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                      </td>
+                    </TRow>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ARCHIVE TAB */}
+      {activeTab==="archive" && (
+        <Card>
+          <h3 style={{ margin:"0 0 16px",fontSize:15,fontWeight:700,color:C.text }}>🗂 أرشيف التقارير الضريبية الشهرية</h3>
+          {monthlyTaxReports.length===0 ? (
+            <div style={{ textAlign:"center",color:C.textMuted,padding:30,fontSize:13 }}>لا توجد تقارير ضريبية محفوظة بعد</div>
+          ) : (
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              {[...monthlyTaxReports].sort((a,b)=>b.month.localeCompare(a.month)).map(r=>{
+                const [y,m] = r.month.split("-");
+                const label = new Date(+y,+m-1,1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"});
+                return (
+                  <div key={r.month} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:13,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:14,fontWeight:700,color:C.text,marginBottom:5 }}>🧾 تقرير ضريبي — {label}</div>
+                      <div style={{ display:"flex",gap:16 }}>
+                        <span style={{ fontSize:11,color:C.yellow }}>إجمالي الضرائب: {fmt(r.grandTotalTax)}</span>
+                        <span style={{ fontSize:11,color:C.green }}>مبيعات: {fmt(r.totalSales)}</span>
+                        <span style={{ fontSize:11,color:r.netProfit>=0?C.green:C.red }}>ربح: {fmt(r.netProfit)}</span>
+                      </div>
+                      <div style={{ fontSize:10,color:C.textMuted,marginTop:4 }}>حُفظ في {fmtDateTime(r.closedAt)}</div>
+                    </div>
+                    <Btn variant="yellow" small onClick={()=>printTaxMonthReport(r, r.month)}>
+                      <Ic d={I.download} s={13} />طباعة
+                    </Btn>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Add Rule Modal */}
+      {showRuleModal && (
+        <Modal title="إضافة قاعدة ضريبية" onClose={()=>setShowRuleModal(false)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Inp label="اسم الضريبة/الرسم" value={ruleForm.name} onChange={v=>setRuleForm({...ruleForm,name:v})} required placeholder="مثال: ضريبة القيمة المضافة" />
+              <Sel label="نوع المنشأة" value={ruleForm.entityType} onChange={v=>setRuleForm({...ruleForm,entityType:v})} options={entityTypes} />
+              <Sel label="نوع الضريبة" value={ruleForm.type} onChange={v=>setRuleForm({...ruleForm,type:v})} options={taxTypes.map(t=>({value:t.value,label:t.label}))} />
+              <Sel label="دورية الاحتساب" value={ruleForm.frequency} onChange={v=>setRuleForm({...ruleForm,frequency:v})} options={[{value:"شهري",label:"شهري"},{value:"سنوي",label:"سنوي"}]} />
+              {ruleForm.type!=="ثابتة شهرية" ? (
+                <>
+                  <Inp label="النسبة %" type="number" value={ruleForm.rate} onChange={v=>setRuleForm({...ruleForm,rate:v})} placeholder="مثال: 14" />
+                  <Sel label="الأساس" value={ruleForm.base} onChange={v=>setRuleForm({...ruleForm,base:v})} options={[{value:"إجمالي المبيعات",label:"إجمالي المبيعات"},{value:"صافي الربح",label:"صافي الربح"},{value:"إجمالي المشتريات",label:"إجمالي المشتريات"}]} />
+                </>
+              ) : (
+                <Inp label="المبلغ الثابت (ج.م)" type="number" value={ruleForm.fixedAmount} onChange={v=>setRuleForm({...ruleForm,fixedAmount:v})} />
+              )}
+            </div>
+            <Inp label="ملاحظات" value={ruleForm.notes} onChange={v=>setRuleForm({...ruleForm,notes:v})} placeholder="أي تفاصيل إضافية..." />
+            <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.yellow }}>
+              💡 سيتم احتساب هذه الضريبة تلقائياً في ملخص الشهر بناءً على بيانات الفواتير.
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShowRuleModal(false)}>إلغاء</Btn>
+              <Btn variant="yellow" onClick={handleSaveRule}>إضافة الضريبة</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+
+
