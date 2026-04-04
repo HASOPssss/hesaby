@@ -1,5 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
+import ReturnsPage from "./ReturnsPage";
+import RevenuePage from "./RevenuePage";
+import TaxInvoicesPage from "./TaxInvoicesPage";
 
 // ─── SUPABASE ─────────────────────────────────────────────────────────────────
 const supabaseUrl = "https://cavzaxxfnxkzsmiratyk.supabase.co";
