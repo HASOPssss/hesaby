@@ -277,6 +277,8 @@ const I = {
   stock: "M3 3h18v18H3zM3 9h18M9 21V9",
   factory: "M2 20V8l6-4 6 4V4l6 4v12H2zM10 20v-5h4v5",
   money: "M12 1v22M17 5H9.5a3.5 3.5 0 100 7h5a3.5 3.5 0 110 7H6",
+  settings: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z",
+  bell: "M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0",
   people: "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75",
 };
 
@@ -707,6 +709,93 @@ function SubscriptionExpired() {
   );
 }
 
+// ─── SET PASSWORD SCREEN (first login) ───────────────────────────────────────
+function SetPasswordScreen({ userId, userEmail, onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const strength = password.length === 0 ? 0 : password.length < 6 ? 1 : password.length < 10 ? 2 : /[A-Z]/.test(password) && /[0-9]/.test(password) ? 4 : 3;
+  const strengthLabel = ["","ضعيفة جداً","ضعيفة","متوسطة","قوية"];
+  const strengthColor = [C.border, C.red, C.yellow, C.blue, C.green];
+
+  const handleSet = async () => {
+    if (password.length < 6) { setErr("كلمة المرور يجب أن تكون 6 أحرف على الأقل"); return; }
+    if (password !== confirm) { setErr("كلمتا المرور غير متطابقتين"); return; }
+    setLoading(true); setErr("");
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) { setErr(error.message); setLoading(false); return; }
+      // Clear first_login flag
+      await supabase.from("profiles").update({ first_login: false, temp_password: null }).eq("id", userId);
+      onDone();
+    } catch(e) { setErr(e.message); }
+    setLoading(false);
+  };
+
+  const inp = { background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"11px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box" };
+
+  return (
+    <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl" }}>
+      <div style={{ background:C.surface,border:`2px solid ${C.accent}33`,borderRadius:24,padding:"44px 48px",width:"min(440px,90vw)",display:"flex",flexDirection:"column",gap:22,boxShadow:`0 0 80px ${C.accent}11` }}>
+        {/* Header */}
+        <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:14,textAlign:"center" }}>
+          <div style={{ width:72,height:72,borderRadius:"50%",background:C.accentDim,border:`2px solid ${C.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 30px ${C.accent}22` }}>
+            <Ic d={I.shield} s={34} c={C.accent} />
+          </div>
+          <div>
+            <div style={{ fontSize:22,fontWeight:800,color:C.text,marginBottom:8,letterSpacing:-0.5 }}>مرحباً بك في حسابي Pro 👋</div>
+            <div style={{ fontSize:13,color:C.textMuted,lineHeight:1.9 }}>
+              هذه أول مرة تدخل فيها على حسابك<br/>
+              <span style={{ color:C.accent,fontWeight:700 }}>{userEmail}</span><br/>
+              يرجى تعيين كلمة مرور خاصة بك للمتابعة
+            </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height:1,background:C.border }} />
+
+        {/* Form */}
+        <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+          <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+            <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>كلمة المرور الجديدة *</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" style={inp} />
+            {/* Strength bar */}
+            {password.length > 0 && (
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginTop:4 }}>
+                <div style={{ flex:1,height:4,borderRadius:4,background:C.surface3,overflow:"hidden" }}>
+                  <div style={{ width:`${(strength/4)*100}%`,height:"100%",background:strengthColor[strength],borderRadius:4,transition:"all 0.3s" }} />
+                </div>
+                <span style={{ fontSize:11,color:strengthColor[strength],fontWeight:700,minWidth:70 }}>{strengthLabel[strength]}</span>
+              </div>
+            )}
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+            <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>تأكيد كلمة المرور *</label>
+            <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&handleSet()}
+              style={{ ...inp, borderColor: confirm && confirm !== password ? C.red : confirm && confirm === password ? C.green : C.border }} />
+            {confirm && confirm !== password && <div style={{ fontSize:11,color:C.red,marginTop:2 }}>كلمتا المرور غير متطابقتين</div>}
+            {confirm && confirm === password && password.length >= 6 && <div style={{ fontSize:11,color:C.green,marginTop:2 }}>✓ متطابقتان</div>}
+          </div>
+
+          {err && <div style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.red }}>{err}</div>}
+
+          <button onClick={handleSet} disabled={loading||!password||!confirm||password!==confirm}
+            style={{ background:loading||!password||!confirm||password!==confirm?C.surface2:C.accent,color:loading||!password||!confirm||password!==confirm?C.textMuted:"#fff",border:"none",borderRadius:12,padding:"13px 0",fontSize:14,fontWeight:800,cursor:loading||!password||!confirm||password!==confirm?"not-allowed":"pointer",fontFamily:"inherit",transition:"all 0.2s",boxShadow:!loading&&password&&confirm&&password===password?`0 4px 20px ${C.accent}33`:"none" }}>
+            {loading ? "جاري الحفظ..." : "تعيين كلمة المرور والدخول →"}
+          </button>
+        </div>
+
+        <div style={{ textAlign:"center",fontSize:11,color:C.textMuted }}>
+          🔒 كلمة المرور مشفرة ولن يستطيع أحد رؤيتها
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
 function LoginScreen({ onSubUserLogin }) {
   const [mode, setMode] = useState("company");
@@ -719,11 +808,24 @@ function LoginScreen({ onSubUserLogin }) {
     if (!form.email || !form.password) { setErr("أدخل البريد الإلكتروني وكلمة المرور"); return; }
     setErr(""); setLoading(true);
     try {
+      // First attempt: normal login with entered password
       const { error } = await supabase.auth.signInWithPassword({ email:form.email, password:form.password });
-      if (error) {
-        if (error.message.includes("Invalid login credentials")) setErr("البريد الإلكتروني أو كلمة المرور غير صحيحة");
-        else if (error.message.includes("Email not confirmed")) setErr("الحساب لم يتم تفعيله، تحقق من بريدك");
-        else setErr(error.message);
+      if (!error) { setLoading(false); return; }
+
+      // If failed, check if this is a first-login account (use temp_password)
+      if (error.message.includes("Invalid login credentials")) {
+        const { data: profileData } = await supabase
+          .from("profiles").select("first_login, temp_password").eq("email", form.email).single();
+        if (profileData?.first_login && profileData?.temp_password) {
+          // Try with temp password (admin-set password)
+          const { error: err2 } = await supabase.auth.signInWithPassword({ email:form.email, password:profileData.temp_password });
+          if (!err2) { setLoading(false); return; } // success — App will detect first_login and show SetPasswordScreen
+        }
+        setErr("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+      } else if (error.message.includes("Email not confirmed")) {
+        setErr("الحساب لم يتم تفعيله — تواصل مع المسؤول");
+      } else {
+        setErr(error.message);
       }
     } catch(e){ setErr(e.message); }
     setLoading(false);
@@ -890,6 +992,7 @@ const ALL_PAGES = [
   { id:"stocktake", label:"الجرد الشهري" },
   { id:"inventoryitems", label:"الأصناف" },
   { id:"categories", label:"الفئات" },
+  { id:"settings", label:"إعدادات الشركة" },
 ];
 
 const ROLE_PRESETS = {
@@ -942,16 +1045,84 @@ function PermissionToastProvider() {
   );
 }
 
+// ─── ADMIN COMPANY VIEWER (Read-Only) ────────────────────────────────────────
+function AdminCompanyViewer({ company, onBack }) {
+  const [page, setPage] = useState("dash");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { data, loading } = useAppData(company.id);
+
+  const navGroups = [
+    { label:"الرئيسية", items:[{ id:"dash", label:"الرئيسية", icon:I.dash }] },
+    { label:"المالية", items:[
+      { id:"sales", label:"المبيعات", icon:I.sales },
+      { id:"purchases", label:"المشتريات", icon:I.purchase },
+      { id:"returns", label:"المرتجعات", icon:I.returns },
+      { id:"revenue", label:"الإيرادات", icon:I.revenue },
+      { id:"taxinvoices", label:"الفواتير الضريبية", icon:I.tax },
+    ]},
+    { label:"الأطراف", items:[
+      { id:"clients", label:"العملاء", icon:I.clients },
+      { id:"suppliers", label:"الموردين", icon:I.suppliers },
+    ]},
+    { label:"التقارير", items:[
+      { id:"reports", label:"التقارير المالية", icon:I.report },
+      { id:"taxreports", label:"التقارير الضريبية", icon:I.tax },
+    ]},
+    { label:"الإنتاج", items:[
+      { id:"production", label:"تكلفة الإنتاج", icon:I.chartBar },
+      { id:"employees", label:"الموظفين", icon:I.clients },
+    ]},
+    { label:"المخزون", items:[
+      { id:"inventory", label:"إدارة المخزون", icon:I.inventory },
+      { id:"stocktake", label:"الجرد الشهري", icon:I.stocktake },
+      { id:"inventoryitems", label:"الأصناف", icon:I.box },
+      { id:"categories", label:"الفئات", icon:I.categories },
+    ]},
+  ];
+
+  // No-op actions — read only
+  const noOp = () => showPermissionToast("وضع المشاهدة فقط — لا يمكن التعديل", "warning");
+  const readOnlyActions = new Proxy({}, { get: () => noOp });
+
+  return (
+    <div style={{ position:"relative" }}>
+      {/* Admin banner */}
+      <div style={{ position:"fixed",top:0,left:0,right:0,zIndex:9999,background:`linear-gradient(90deg,${C.accent},#a78bfa)`,padding:"8px 24px",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+          <Ic d={I.shield} s={16} c="#fff" />
+          <span style={{ color:"#fff",fontWeight:700,fontSize:13,fontFamily:"'Cairo','Segoe UI',sans-serif" }}>
+            🔍 مشاهدة كمشرف — {company.company_name || company.email}
+          </span>
+          <span style={{ background:"rgba(255,255,255,0.25)",color:"#fff",fontSize:11,padding:"2px 10px",borderRadius:20,fontWeight:700 }}>للقراءة فقط</span>
+        </div>
+        <button onClick={onBack} style={{ background:"rgba(255,255,255,0.2)",border:"1px solid rgba(255,255,255,0.4)",borderRadius:8,padding:"6px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Cairo','Segoe UI',sans-serif",display:"flex",alignItems:"center",gap:6 }}>
+          <Ic d={I.logout} s={13} c="#fff" />العودة للادمن
+        </button>
+      </div>
+      <div style={{ paddingTop:42 }}>
+        <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={readOnlyActions}
+          loading={loading} userEmail={company.company_name || company.email}
+          onLogout={onBack}
+          roleBadge={<span style={{ background:"rgba(108,127,255,0.2)",color:C.accent,border:`1px solid ${C.accent}33`,borderRadius:20,padding:"2px 10px",fontSize:10,fontWeight:700 }}>مشرف — قراءة فقط</span>}
+          sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 function AdminPanel() {
   const [activeTab, setActiveTab] = useState("clients"); // clients | subusers
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [newUser, setNewUser] = useState({ email:"", password:"", company:"" });
+  const [newUser, setNewUser] = useState({ email:"", password:"", company:"", firstLogin:true, subscriptionExpires: new Date(Date.now() + 365*24*60*60*1000).toISOString().split("T")[0] });
   const [adding, setAdding] = useState(false);
   const [msg, setMsg] = useState({ text:"", type:"" });
+  const showMsg = (text, type="success") => { setMsg({ text, type }); setTimeout(()=>setMsg({text:"",type:""}),3500); };
   const [toggling, setToggling] = useState(null);
+  const [adminViewingCompany, setAdminViewingCompany] = useState(null); // { id, email, company_name }
 
   // Sub-users state
   const [subUsers, setSubUsers] = useState([]);
@@ -964,7 +1135,89 @@ function AdminPanel() {
   const [editingSub, setEditingSub] = useState(null); // sub-user being edited
   const [editForm, setEditForm] = useState(null);
 
-  const showMsg = (text, type="success") => { setMsg({ text, type }); setTimeout(()=>setMsg({text:"",type:""}),4000); };
+  const [editingCompany, setEditingCompany] = useState(null);
+  const [editCompanyForm, setEditCompanyForm] = useState({ email:"", company_name:"", subscription_expires_at:"", allowed_pages: ALL_PAGES.map(p=>p.id) });
+  const [auditLog, setAuditLog] = useState([]);
+  const [showAuditLog, setShowAuditLog] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  // ── Load audit log from Supabase ──
+  const loadAuditLog = async () => {
+    setAuditLoading(true);
+    const { data, error } = await supabase
+      .from("admin_logs")
+      .select("*")
+      .order("performed_at", { ascending: false })
+      .limit(200);
+    if (!error && data) {
+      setAuditLog(data.map(r => ({
+        id: r.id,
+        action: r.action,
+        details: r.details,
+        timestamp: r.performed_at,
+      })));
+    }
+    setAuditLoading(false);
+  };
+
+  // ── Audit log helper — saves to Supabase ──
+  const addAuditLog = async (action, details) => {
+    const entry = { id: Date.now(), action, details, timestamp: new Date().toISOString() };
+    setAuditLog(prev => [entry, ...prev.slice(0, 199)]);
+    await supabase.from("admin_logs").insert({ action, details });
+  };
+
+  // ── Open edit company modal ──
+  const openEditCompany = (u) => {
+    setEditingCompany(u);
+    setEditCompanyForm({
+      email: u.email || "",
+      company_name: u.company_name || "",
+      subscription_expires_at: u.subscription_expires_at ? u.subscription_expires_at.split("T")[0] : "",
+      allowed_pages: u.allowed_pages || ALL_PAGES.map(p=>p.id),
+    });
+  };
+
+  // ── Save edit company ──
+  const saveEditCompany = async () => {
+    const updates = {
+      company_name: editCompanyForm.company_name,
+      subscription_expires_at: editCompanyForm.subscription_expires_at ? new Date(editCompanyForm.subscription_expires_at + "T23:59:59").toISOString() : null,
+      allowed_pages: editCompanyForm.allowed_pages,
+    };
+    const { error } = await supabase.from("profiles").update(updates).eq("id", editingCompany.id);
+    if (!error) {
+      setUsers(prev => prev.map(u => u.id === editingCompany.id ? { ...u, ...updates, allowed_pages: editCompanyForm.allowed_pages } : u));
+      addAuditLog("تعديل بيانات شركة", `${editingCompany.email} → اسم: ${editCompanyForm.company_name}, انتهاء الاشتراك: ${editCompanyForm.subscription_expires_at || "غير محدد"}, صفحات: ${editCompanyForm.allowed_pages.length}`);
+      showMsg(`✓ تم تحديث بيانات ${editingCompany.email}`);
+      setEditingCompany(null);
+    } else showMsg("خطأ: " + error.message, "error");
+  };
+
+  // ── Export companies to CSV/Excel ──
+  const exportCompaniesCSV = () => {
+    const headers = ["البريد الإلكتروني", "اسم الشركة", "تاريخ الإنشاء", "انتهاء الاشتراك", "الحالة", "عدد الموظفين"];
+    const rows = clientUsers.map(u => {
+      const empCount = subUsers.filter(su => su.owner_id === u.id).length;
+      return [
+        u.email,
+        u.company_name || "",
+        u.created_at ? new Date(u.created_at).toLocaleDateString("ar-EG") : "",
+        u.subscription_expires_at ? new Date(u.subscription_expires_at).toLocaleDateString("ar-EG") : "",
+        u.is_active ? "فعال" : "معطل",
+        empCount,
+      ];
+    });
+    const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `شركات_حسابي_pro_${new Date().toLocaleDateString("ar-EG").replace(/\//g,"-")}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+    addAuditLog("تصدير بيانات الشركات", `${clientUsers.length} شركة`);
+  };
+
+
 
   // ── Load company clients ──
   const loadUsers = async () => {
@@ -984,7 +1237,7 @@ function AdminPanel() {
     setSubLoading(false);
   };
 
-  useEffect(() => { loadUsers(); loadSubUsers(); }, []);
+  useEffect(() => { loadUsers(); loadSubUsers(); loadAuditLog(); }, []);
 
   // ── Toggle client subscription (also toggles all sub_users under that company) ──
   const toggleUser = async (user) => {
@@ -997,6 +1250,7 @@ function AdminPanel() {
       setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: newStatus } : u));
       setSubUsers(prev => prev.map(su => su.owner_id === user.id ? { ...su, is_active: newStatus } : su));
       showMsg(newStatus ? `✓ تم تفعيل ${user.email} وجميع موظفيها` : `✓ تم تعطيل ${user.email} وجميع موظفيها`, newStatus ? "success" : "warning");
+      addAuditLog(newStatus ? "تفعيل اشتراك شركة" : "إيقاف اشتراك شركة", user.email);
     } else { showMsg("حدث خطأ، حاول مرة أخرى", "error"); }
     setToggling(null);
   };
@@ -1007,18 +1261,33 @@ function AdminPanel() {
     if (newUser.password.length < 6) { showMsg("كلمة المرور 6 أحرف على الأقل", "error"); return; }
     setAdding(true);
     try {
-      // Save admin session BEFORE signUp (signUp auto-logs in the new user and kicks admin out)
       const { data: { session: adminSession } } = await supabase.auth.getSession();
 
-      // Use signUp — this works with publishable key
       const { data, error } = await supabase.auth.signUp({
         email: newUser.email,
         password: newUser.password,
-        options: { data: { company_name: newUser.company || "" } }
+        options: {
+          data: { company_name: newUser.company || "" },
+          emailRedirectTo: undefined,
+        }
       });
       if (error) { showMsg(error.message, "error"); setAdding(false); return; }
 
-      // Restore admin session immediately after signUp hijacks it
+      if (data.user) {
+        // Save profile IMMEDIATELY with first_login flag before restoring admin session
+        await supabase.from("profiles").upsert({
+          id: data.user.id,
+          email: newUser.email,
+          company_name: newUser.company || "",
+          is_active: true,
+          email_confirmed: true,
+          first_login: newUser.firstLogin,
+          temp_password: newUser.firstLogin ? newUser.password : null,
+          subscription_expires_at: newUser.subscriptionExpires ? new Date(newUser.subscriptionExpires + "T23:59:59").toISOString() : null,
+        }, { onConflict: "id" });
+      }
+
+      // Restore admin session
       if (adminSession?.access_token) {
         await supabase.auth.setSession({
           access_token: adminSession.access_token,
@@ -1026,23 +1295,17 @@ function AdminPanel() {
         });
       }
 
-      // Update profile if user was created
       if (data.user) {
-        await supabase.from("profiles").upsert({
-          id: data.user.id,
-          email: newUser.email,
-          company_name: newUser.company || "",
-          is_active: true,
-        }, { onConflict: "id" });
-        // Add to local list immediately without waiting for DB reload
         setUsers(prev => {
           const exists = prev.some(u => u.id === data.user.id);
           if (exists) return prev;
-          return [{ id: data.user.id, email: newUser.email, company_name: newUser.company||"", is_active: true, created_at: new Date().toISOString() }, ...prev];
+          return [{ id: data.user.id, email: newUser.email, company_name: newUser.company||"", is_active: true, created_at: new Date().toISOString(), first_login: newUser.firstLogin }, ...prev];
         });
       }
       showMsg(`✓ تم إضافة ${newUser.email} بنجاح`);
-      setNewUser({ email:"", password:"", company:"" }); setShowAdd(false);
+      addAuditLog("إضافة شركة جديدة", `${newUser.email} — ${newUser.company || "بدون اسم"}`);
+      setNewUser({ email:"", password:"", company:"", firstLogin:true, subscriptionExpires: new Date(Date.now() + 365*24*60*60*1000).toISOString().split("T")[0] });
+      setShowAdd(false);
       setTimeout(loadUsers, 2000);
     } catch(e) { showMsg(e.message, "error"); }
     setAdding(false);
@@ -1092,8 +1355,31 @@ function AdminPanel() {
 
   const deleteSubUser = async (id) => {
     const { error } = await supabase.from("sub_users").delete().eq("id", id);
-    if (!error) { setSubUsers(prev => prev.filter(s => s.id !== id)); showMsg("✓ تم الحذف"); }
+    if (!error) { setSubUsers(prev => prev.filter(s => s.id !== id)); showMsg("✓ تم الحذف"); addAuditLog("حذف موظف", `id: ${id}`); }
     else showMsg("خطأ في الحذف", "error");
+  };
+
+  const [deletingCompanyId, setDeletingCompanyId] = useState(null);
+  const [confirmDeleteCompany, setConfirmDeleteCompany] = useState(null); // user object to delete
+
+  const deleteCompany = async (user) => {
+    setDeletingCompanyId(user.id);
+    try {
+      // Delete all sub_users under this company
+      await supabase.from("sub_users").delete().eq("owner_id", user.id);
+      // Delete all records belonging to this company
+      await supabase.from("records").delete().eq("user_id", user.id);
+      // Delete profile
+      const { error } = await supabase.from("profiles").delete().eq("id", user.id);
+      if (!error) {
+        setUsers(prev => prev.filter(u => u.id !== user.id));
+        setSubUsers(prev => prev.filter(s => s.owner_id !== user.id));
+        showMsg(`✓ تم حذف ${user.email} وجميع بياناتها`);
+        addAuditLog("حذف شركة", `${user.email} — ${user.company_name || "بدون اسم"}`);
+      } else showMsg("خطأ في الحذف: " + error.message, "error");
+    } catch(e) { showMsg("خطأ: " + e.message, "error"); }
+    setDeletingCompanyId(null);
+    setConfirmDeleteCompany(null);
   };
 
   const openEditSub = (su) => {
@@ -1126,12 +1412,18 @@ function AdminPanel() {
     if (!error) {
       setSubUsers(prev => prev.map(s => s.id === editingSub.id ? { ...s, ...updates } : s));
       showMsg(`✓ تم تحديث بيانات "${editForm.username}" بنجاح`);
+      addAuditLog("تعديل بيانات موظف", `${editForm.username} — دور: ${editForm.role}`);
       setEditingSub(null); setEditForm(null);
     } else showMsg("خطأ في الحفظ: " + error.message, "error");
   };
 
   const clientUsers = users.filter(u => u.email !== ADMIN_EMAIL);
   const activeCount = clientUsers.filter(u => u.is_active).length;
+
+  // Admin viewing a company's data in read-only mode
+  if (adminViewingCompany) {
+    return <AdminCompanyViewer company={adminViewingCompany} onBack={()=>setAdminViewingCompany(null)} />;
+  }
 
   const tabStyle = (id) => ({
     padding:"10px 24px",borderRadius:10,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",transition:"all 0.2s",
@@ -1157,6 +1449,8 @@ function AdminPanel() {
               {msg.text}
             </div>
           )}
+          <Btn variant="cyan" onClick={exportCompaniesCSV}><Ic d={I.excel} s={14} />تصدير Excel</Btn>
+          <Btn variant="yellow" onClick={()=>{ setShowAuditLog(p=>{ if(!p) loadAuditLog(); return !p; }); }}><Ic d={I.report} s={14} />سجل النشاط</Btn>
           <Btn variant="danger" onClick={()=>supabase.auth.signOut()}><Ic d={I.logout} s={14} />خروج</Btn>
         </div>
       </div>
@@ -1179,6 +1473,72 @@ function AdminPanel() {
         ))}
       </div>
 
+      {/* Expiring Soon Alerts */}
+      {(() => {
+        const now = new Date();
+        const expiring = clientUsers.filter(u => {
+          if (!u.subscription_expires_at) return false;
+          const d = new Date(u.subscription_expires_at);
+          const days = Math.ceil((d - now)/(1000*60*60*24));
+          return days >= 0 && days <= 7;
+        });
+        if (!expiring.length) return null;
+        return (
+          <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}44`,borderRadius:14,padding:"14px 20px",marginBottom:8 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:10 }}>
+              <Ic d={I.alert} s={18} c={C.yellow} />
+              <span style={{ fontWeight:700,color:C.yellow,fontSize:14 }}>⚠ تنبيه: {expiring.length} شركة اشتراكها على وشك الانتهاء</span>
+            </div>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              {expiring.map(u => {
+                const daysLeft = Math.ceil((new Date(u.subscription_expires_at) - now)/(1000*60*60*24));
+                return (
+                  <div key={u.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,border:`1px solid ${C.yellow}22`,borderRadius:10,padding:"8px 14px" }}>
+                    <span style={{ fontWeight:600,color:C.text,fontSize:13 }}>{u.company_name||u.email}</span>
+                    <span style={{ color:C.yellow,fontWeight:700,fontSize:12 }}>ينتهي خلال {daysLeft} يوم — {new Date(u.subscription_expires_at).toLocaleDateString("ar-EG")}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Audit Log Panel */}
+      {showAuditLog && (
+        <div style={{ background:C.surface,border:`1px solid ${C.yellow}33`,borderRadius:16,padding:"20px 22px",marginBottom:8 }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+              <div style={{ fontSize:15,fontWeight:700,color:C.text }}>📋 سجل نشاط الادمن</div>
+              <button onClick={loadAuditLog} style={{ background:C.accentDim,color:C.accent,border:`1px solid ${C.accent}33`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+                {auditLoading ? "جاري التحميل..." : "🔄 تحديث"}
+              </button>
+            </div>
+            <button onClick={()=>setShowAuditLog(false)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:"5px 8px",display:"flex" }}><Ic d={I.close} s={14} /></button>
+          </div>
+          {auditLoading ? (
+            <div style={{ textAlign:"center",color:C.textMuted,padding:24,fontSize:13 }}>جاري تحميل السجل...</div>
+          ) : auditLog.length === 0 ? (
+            <div style={{ textAlign:"center",color:C.textMuted,padding:24,fontSize:13 }}>لا توجد عمليات مسجلة بعد</div>
+          ) : (
+            <div style={{ display:"flex",flexDirection:"column",gap:8,maxHeight:340,overflowY:"auto" }}>
+              {auditLog.map(entry => (
+                <div key={entry.id} style={{ display:"flex",gap:14,alignItems:"flex-start",background:C.surface2,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px" }}>
+                  <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:8,padding:"4px 8px",flexShrink:0 }}>
+                    <Ic d={I.shield} s={13} c={C.yellow} />
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13,fontWeight:700,color:C.text }}>{entry.action}</div>
+                    <div style={{ fontSize:11,color:C.textMuted,marginTop:2 }}>{entry.details}</div>
+                  </div>
+                  <div style={{ fontSize:10,color:C.textMuted,whiteSpace:"nowrap",flexShrink:0 }}>{fmtDateTime(entry.timestamp)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tabs */}
       <div style={{ display:"flex",gap:6,marginBottom:20,background:C.surface2,padding:4,borderRadius:14,border:`1px solid ${C.border}`,width:"fit-content" }}>
         <button style={tabStyle("clients")} onClick={()=>setActiveTab("clients")}>🏢 إدارة الشركات العملاء</button>
@@ -1195,22 +1555,57 @@ function AdminPanel() {
           <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden" }}>
             {loading ? <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>جاري التحميل...</div> : (
               <table style={{ width:"100%",borderCollapse:"collapse" }}>
-                <THead cols={["البريد الإلكتروني","اسم الشركة","تاريخ الإنشاء","الموظفون","الحالة","التحكم"]} />
+                <THead cols={["البريد الإلكتروني","اسم الشركة","تاريخ الإنشاء","انتهاء الاشتراك","الموظفون","الحالة","التحكم"]} />
                 <tbody>
                   {clientUsers.map((u,i)=>{
                     const empCount = subUsers.filter(su=>su.owner_id===u.id).length;
+                    const expDate = u.subscription_expires_at ? new Date(u.subscription_expires_at) : null;
+                    const now = new Date();
+                    const daysLeft = expDate ? Math.ceil((expDate - now)/(1000*60*60*24)) : null;
+                    const isExpiringSoon = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
+                    const isExpired = daysLeft !== null && daysLeft < 0;
                     return (
                       <TRow key={u.id} alt={i%2}>
                         <TD><span style={{ fontWeight:600 }}>{u.email}</span></TD>
                         <TD color={C.textDim}>{u.company_name||"—"}</TD>
-                        <TD color={C.textMuted}>{new Date(u.created_at).toLocaleDateString("ar-EG")}</TD>
+                        <TD color={C.textMuted}>{u.created_at ? new Date(u.created_at).toLocaleDateString("ar-EG", {year:"numeric",month:"2-digit",day:"2-digit"}) : "—"}</TD>
+                        <td style={{ padding:"11px 14px" }}>
+                          {expDate ? (
+                            <div style={{ display:"flex",flexDirection:"column",gap:3 }}>
+                              <span style={{ fontSize:12,color:isExpired?C.red:isExpiringSoon?C.yellow:C.textDim,fontWeight:700 }}>
+                                {expDate.toLocaleDateString("ar-EG",{year:"numeric",month:"2-digit",day:"2-digit"})}
+                              </span>
+                              {isExpiringSoon && !isExpired && <span style={{ background:C.yellowDim,color:C.yellow,border:`1px solid ${C.yellow}33`,padding:"1px 7px",borderRadius:20,fontSize:10,fontWeight:700 }}>⚠ {daysLeft} يوم متبقي</span>}
+                              {isExpired && <span style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,padding:"1px 7px",borderRadius:20,fontSize:10,fontWeight:700 }}>منتهي</span>}
+                            </div>
+                          ) : <span style={{ color:C.textMuted,fontSize:12 }}>—</span>}
+                        </td>
                         <TD><span style={{ background:C.purpleDim,color:C.purple,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>{empCount} موظف</span></TD>
-                        <td style={{ padding:"11px 14px" }}><Badge label={u.is_active?"مدفوعة":"غير مدفوعة"} /></td>
-                        <td style={{ padding:"11px 14px",display:"flex",gap:8,alignItems:"center" }}>
-                          <button onClick={()=>toggleUser(u)} disabled={toggling===u.id}
-                            style={{ background:u.is_active?C.redDim:C.greenDim,color:u.is_active?C.red:C.green,border:`1px solid ${u.is_active?C.red:C.green}33`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
-                            {toggling===u.id?"...":(u.is_active?"إيقاف":"تفعيل")}
-                          </button>
+                        <td style={{ padding:"11px 14px" }}>
+                          <div style={{ display:"flex",flexDirection:"column",gap:4 }}>
+                            <Badge label={u.is_active?"مدفوعة":"غير مدفوعة"} />
+                            {u.first_login && <span style={{ background:C.accentDim,color:C.accent,border:`1px solid ${C.accent}33`,padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,whiteSpace:"nowrap" }}>🔑 لم يُعيّن باسورد</span>}
+                          </div>
+                        </td>
+                        <td style={{ padding:"11px 14px" }}>
+                          <div style={{ display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
+                            <button onClick={()=>setAdminViewingCompany(u)}
+                              style={{ background:C.accentDim,color:C.accent,border:`1px solid ${C.accent}33`,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5 }}>
+                              <Ic d={I.report} s={12} />عرض
+                            </button>
+                            <button onClick={()=>openEditCompany(u)}
+                              style={{ background:C.blueDim,color:C.blue,border:`1px solid ${C.blue}33`,borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5 }} title="تعديل">
+                              <Ic d={I.edit} s={12} />
+                            </button>
+                            <button onClick={()=>toggleUser(u)} disabled={toggling===u.id}
+                              style={{ background:u.is_active?C.redDim:C.greenDim,color:u.is_active?C.red:C.green,border:`1px solid ${u.is_active?C.red:C.green}33`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+                              {toggling===u.id?"...":(u.is_active?"إيقاف":"تفعيل")}
+                            </button>
+                            <button onClick={()=>setConfirmDeleteCompany(u)} disabled={deletingCompanyId===u.id}
+                              style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5 }} title="حذف الشركة">
+                              <Ic d={I.trash} s={12} />
+                            </button>
+                          </div>
                         </td>
                       </TRow>
                     );
@@ -1233,7 +1628,7 @@ function AdminPanel() {
           <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden" }}>
             {subLoading ? <div style={{ padding:40,textAlign:"center",color:C.textMuted }}>جاري التحميل...</div> : (
               <table style={{ width:"100%",borderCollapse:"collapse" }}>
-                <THead cols={["اسم المستخدم","الاسم","الشركة","الدور","الصلاحيات","الصفحات","الحالة","التحكم"]} />
+                <THead cols={["اسم المستخدم","الاسم","الشركة","الدور","الصلاحيات","الصفحات","تاريخ الإضافة","الحالة","التحكم"]} />
                 <tbody>
                   {subUsers.map((su,i)=>{
                     const ownerProfile = users.find(u=>u.id===su.owner_id);
@@ -1253,6 +1648,7 @@ function AdminPanel() {
                           </div>
                         </td>
                         <TD color={C.textMuted}><span style={{ fontSize:11 }}>{pagesCount} صفحة</span></TD>
+                        <TD color={C.textMuted}><span style={{ fontSize:11 }}>{su.created_at ? new Date(su.created_at).toLocaleDateString("ar-EG",{year:"numeric",month:"2-digit",day:"2-digit"}) : "—"}</span></TD>
                         <td style={{ padding:"11px 14px" }}><Badge label={su.is_active?"مدفوعة":"غير مدفوعة"} /></td>
                         <td style={{ padding:"11px 14px" }}>
                           <div style={{ display:"flex",gap:6 }}>
@@ -1279,7 +1675,71 @@ function AdminPanel() {
         </div>
       )}
 
-      {/* ── Add Company Modal ── */}
+      {editingCompany && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16 }}>
+          <div style={{ background:C.surface,border:`1px solid ${C.blue}33`,borderRadius:22,padding:32,width:"min(580px,95vw)",maxHeight:"90vh",overflowY:"auto",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,display:"flex",flexDirection:"column",gap:18,boxShadow:`0 0 60px ${C.blue}22` }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>✏️ تعديل بيانات الشركة</h2>
+              <button onClick={()=>setEditingCompany(null)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
+            </div>
+            {msg.text && <div style={{ background:msg.type==="success"?C.greenDim:C.redDim,border:`1px solid ${msg.type==="success"?C.green:C.red}33`,color:msg.type==="success"?C.green:C.red,borderRadius:10,padding:"10px 16px",fontSize:13,fontWeight:700 }}>{msg.text}</div>}
+            <div style={{ background:C.blueDim,border:`1px solid ${C.blue}22`,borderRadius:12,padding:"12px 16px",fontSize:12,color:C.blue }}>
+              🔵 تعديل: <strong>{editingCompany.email}</strong>
+            </div>
+            <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+              {/* Email — locked, never editable */}
+              <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+                <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>البريد الإلكتروني</label>
+                <div style={{ display:"flex",alignItems:"center",gap:8,background:C.surface3,border:`1px solid ${C.border}`,borderRadius:9,padding:"10px 13px" }}>
+                  <Ic d={I.shield} s={14} c={C.textMuted} />
+                  <span style={{ fontSize:13,color:C.textMuted,flex:1 }}>{editingCompany.email}</span>
+                  <span style={{ fontSize:10,color:C.textMuted,background:C.surface2,borderRadius:6,padding:"2px 8px",border:`1px solid ${C.border}` }}>ثابت</span>
+                </div>
+                <div style={{ fontSize:11,color:C.textMuted }}>البريد الإلكتروني لا يمكن تغييره</div>
+              </div>
+              <Inp label="اسم الشركة" value={editCompanyForm.company_name} onChange={v=>setEditCompanyForm({...editCompanyForm,company_name:v})} placeholder="شركة النور للتجارة" />
+              <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+                <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>تاريخ انتهاء الاشتراك</label>
+                <input type="date" value={editCompanyForm.subscription_expires_at} onChange={e=>setEditCompanyForm({...editCompanyForm,subscription_expires_at:e.target.value})}
+                  style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}
+                  onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+                {editCompanyForm.subscription_expires_at && (() => {
+                  const days = Math.ceil((new Date(editCompanyForm.subscription_expires_at) - new Date())/(1000*60*60*24));
+                  return <div style={{ fontSize:11,color:days<=7?C.yellow:C.green,fontWeight:600 }}>{days > 0 ? `متبقي ${days} يوم` : "منتهي الصلاحية"}</div>;
+                })()}
+              </div>
+              {/* Allowed pages for this company */}
+              <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:14,padding:16 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+                  <span style={{ fontSize:13,fontWeight:700,color:C.text }}>الصفحات المسموح بها ({editCompanyForm.allowed_pages.length} من {ALL_PAGES.length})</span>
+                  <div style={{ display:"flex",gap:8 }}>
+                    <button onClick={()=>setEditCompanyForm(p=>({...p,allowed_pages:ALL_PAGES.map(pg=>pg.id)}))} style={{ background:C.greenDim,color:C.green,border:`1px solid ${C.green}33`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>تحديد الكل</button>
+                    <button onClick={()=>setEditCompanyForm(p=>({...p,allowed_pages:[]}))} style={{ background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>إلغاء الكل</button>
+                  </div>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8 }}>
+                  {ALL_PAGES.map(pg=>{
+                    const checked = editCompanyForm.allowed_pages.includes(pg.id);
+                    return (
+                      <label key={pg.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 12px",borderRadius:10,background:checked?C.accentDim:C.surface3,border:`1px solid ${checked?C.accent+"44":C.border}`,cursor:"pointer",transition:"all 0.15s" }}>
+                        <input type="checkbox" checked={checked} onChange={e=>setEditCompanyForm(prev=>({
+                          ...prev,
+                          allowed_pages: e.target.checked ? [...prev.allowed_pages,pg.id] : prev.allowed_pages.filter(x=>x!==pg.id)
+                        }))} style={{ accentColor:C.accent,width:14,height:14 }} />
+                        <span style={{ fontSize:12,fontWeight:600,color:checked?C.accent:C.textMuted }}>{pg.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setEditingCompany(null)}>إلغاء</Btn>
+              <Btn variant="cyan" onClick={saveEditCompany}><Ic d={I.edit} s={14} />حفظ التعديلات</Btn>
+            </div>
+          </div>
+        </div>
+      )}
       {showAdd && (
         <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000 }}>
           <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:22,padding:32,width:"min(460px,92vw)",display:"flex",flexDirection:"column",gap:16 }}>
@@ -1288,10 +1748,28 @@ function AdminPanel() {
               <button onClick={()=>setShowAdd(false)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
             </div>
             <Inp label="البريد الإلكتروني *" value={newUser.email} onChange={v=>setNewUser({...newUser,email:v})} type="email" placeholder="company@example.com" />
-            <Inp label="كلمة المرور * (6 أحرف على الأقل)" value={newUser.password} onChange={v=>setNewUser({...newUser,password:v})} placeholder="اكتبها واحفظها جيداً" />
+            <Inp label="كلمة المرور المؤقتة * (6 أحرف على الأقل)" value={newUser.password} onChange={v=>setNewUser({...newUser,password:v})} placeholder="احفظها جيداً" />
             <Inp label="اسم الشركة" value={newUser.company} onChange={v=>setNewUser({...newUser,company:v})} placeholder="شركة النور للتجارة" />
-            <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:10,padding:"11px 14px",fontSize:12,color:C.yellow,lineHeight:1.7 }}>
-              ⚠️ سيتم إرسال إيميل تأكيد للعميل — احفظ كلمة المرور لأنك لن تراها مرة أخرى
+
+            {/* First Login Toggle */}
+            <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px" }}>
+              <label style={{ display:"flex",alignItems:"center",gap:12,cursor:"pointer" }}>
+                <div onClick={()=>setNewUser(p=>({...p,firstLogin:!p.firstLogin}))}
+                  style={{ width:44,height:24,borderRadius:12,background:newUser.firstLogin?C.accent:C.surface3,border:`1px solid ${newUser.firstLogin?C.accent:C.border}`,position:"relative",transition:"all 0.2s",flexShrink:0 }}>
+                  <div style={{ position:"absolute",top:3,right:newUser.firstLogin?3:undefined,left:newUser.firstLogin?undefined:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"all 0.2s",boxShadow:"0 1px 4px rgba(0,0,0,0.3)" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize:13,fontWeight:700,color:C.text }}>دخول أول مرة بدون باسورد</div>
+                  <div style={{ fontSize:11,color:C.textMuted,marginTop:2 }}>العميل يدخل بأي كلمة مرور أول مرة ثم يُجبر على تعيين باسورد جديد</div>
+                </div>
+              </label>
+            </div>
+
+            <div style={{ background:newUser.firstLogin?C.accentDim:C.greenDim,border:`1px solid ${newUser.firstLogin?C.accent:C.green}33`,borderRadius:10,padding:"11px 14px",fontSize:12,color:newUser.firstLogin?C.accent:C.green,lineHeight:1.7 }}>
+              {newUser.firstLogin
+                ? "🔑 العميل سيدخل أول مرة بأي كلمة مرور، ثم سيُطلب منه تعيين باسورد خاص به"
+                : "✅ الحساب جاهز للدخول فوراً — العميل يستخدم كلمة المرور المؤقتة المكتوبة أعلاه"
+              }<br/>⚠️ احفظ كلمة المرور لأنك لن تراها مرة أخرى
             </div>
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end",marginTop:4 }}>
               <Btn variant="ghost" onClick={()=>setShowAdd(false)}>إلغاء</Btn>
@@ -1390,6 +1868,15 @@ function AdminPanel() {
         </div>
       )}
 
+      {/* ── Confirm Delete Company ── */}
+      {confirmDeleteCompany && (
+        <ConfirmDialog
+          message={`هل تريد حذف شركة "${confirmDeleteCompany.company_name || confirmDeleteCompany.email}" نهائياً؟ سيتم حذف جميع موظفيها وبياناتها ولا يمكن التراجع.`}
+          onConfirm={()=>deleteCompany(confirmDeleteCompany)}
+          onCancel={()=>setConfirmDeleteCompany(null)}
+        />
+      )}
+
       {/* ── Edit Sub-User Modal ── */}
       {editingSub && editForm && (
         <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16 }}>
@@ -1408,8 +1895,15 @@ function AdminPanel() {
               <Inp label="كلمة مرور جديدة (اتركه فارغ للإبقاء)" value={editForm.password_plain} onChange={v=>setEditForm({...editForm,password_plain:v})} placeholder="••••••••" />
               <Inp label="الاسم المعروض" value={editForm.display_name} onChange={v=>setEditForm({...editForm,display_name:v})} placeholder="أحمد محمد" />
               <Sel label="الدور الوظيفي" value={editForm.role} onChange={v=>setEditForm({...editForm,role:v})} options={Object.keys(ROLE_PRESETS).map(r=>({value:r,label:r}))} />
-              <Sel label="الشركة المرتبطة" value={editForm.owner_id} onChange={v=>setEditForm({...editForm,owner_id:v})}
-                options={users.filter(u=>u.email!==ADMIN_EMAIL).map(u=>({value:u.id,label:u.company_name||u.email}))} />
+              <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+                <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>الشركة المرتبطة</label>
+                <div style={{ display:"flex",alignItems:"center",gap:8,background:C.surface3,border:`1px solid ${C.border}`,borderRadius:9,padding:"10px 13px" }}>
+                  <Ic d={I.shield} s={14} c={C.textMuted} />
+                  <span style={{ fontSize:13,color:C.textMuted,flex:1 }}>{users.find(u=>u.id===editForm.owner_id)?.company_name || users.find(u=>u.id===editForm.owner_id)?.email || "—"}</span>
+                  <span style={{ fontSize:10,color:C.textMuted,background:C.surface2,borderRadius:6,padding:"2px 8px",border:`1px solid ${C.border}` }}>ثابت</span>
+                </div>
+                <div style={{ fontSize:11,color:C.textMuted }}>لا يمكن تغيير الشركة المرتبطة بالموظف</div>
+              </div>
             </div>
 
             <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:14,padding:16 }}>
@@ -2876,6 +3370,7 @@ function EmployeesPage() {
   const [modalType, setModalType] = useState("employee");
   const [confirm, setConfirm] = useState(null);
   const [empForm, setEmpForm] = useState({ name:"", position:"", baseSalary:"", phone:"", startDate:today(), notes:"" });
+  const [editingEmp, setEditingEmp] = useState(null);
   const [salForm, setSalForm] = useState({ employeeId:"", month:today().slice(0,7), baseSalary:"", bonus:"", deductions:"", notes:"", paymentMethod:"نقدي" });
   const [attForm, setAttForm] = useState({ employeeId:"", date:today(), type:"غياب", reason:"" });
   const [advForm, setAdvForm] = useState({ employeeId:"", date:today(), amount:"", reason:"", status:"قيد السداد" });
@@ -2889,9 +3384,21 @@ function EmployeesPage() {
 
   const handleSaveEmployee = () => {
     if (!empForm.name.trim()) return;
-    saveEmp([...employees, { id:"EMP"+Date.now().toString().slice(-5), ...empForm, baseSalary:parseFloat(empForm.baseSalary)||0 }]);
+    if (editingEmp) {
+      saveEmp(employees.map(e => e.id === editingEmp.id ? { ...e, ...empForm, baseSalary:parseFloat(empForm.baseSalary)||0 } : e));
+      setEditingEmp(null);
+    } else {
+      saveEmp([...employees, { id:"EMP"+Date.now().toString().slice(-5), ...empForm, baseSalary:parseFloat(empForm.baseSalary)||0, createdAt: new Date().toISOString() }]);
+    }
     setShowModal(false);
     setEmpForm({ name:"", position:"", baseSalary:"", phone:"", startDate:today(), notes:"" });
+  };
+
+  const openEditEmp = (e) => {
+    setEditingEmp(e);
+    setEmpForm({ name:e.name, position:e.position||"", baseSalary:e.baseSalary||"", phone:e.phone||"", startDate:e.startDate||today(), notes:e.notes||"" });
+    setModalType("employee");
+    setShowModal(true);
   };
 
   const handleSaveSalary = () => {
@@ -2964,7 +3471,7 @@ function EmployeesPage() {
       {tab==="employees" && (
         <Card style={{ padding:0 }}>
           <table style={{ width:"100%",borderCollapse:"collapse" }}>
-            <THead cols={["الكود","الاسم","المنصب","الراتب الأساسي","الهاتف","تاريخ التعيين","ملاحظات",""]} />
+            <THead cols={["الكود","الاسم","المنصب","الراتب الأساسي","الهاتف","تاريخ التعيين","تاريخ الإضافة","ملاحظات",""]} />
             <tbody>
               {employees.map((e,idx)=>(
                 <TRow key={e.id} alt={idx%2}>
@@ -2973,10 +3480,14 @@ function EmployeesPage() {
                   <TD color={C.textDim}>{e.position||"—"}</TD>
                   <TD mono color={C.green}>{fmt(e.baseSalary)}</TD>
                   <TD color={C.textMuted}>{e.phone||"—"}</TD>
-                  <TD color={C.textMuted}>{e.startDate}</TD>
+                  <TD color={C.textMuted}>{e.startDate||"—"}</TD>
+                  <TD color={C.textMuted}>{e.createdAt ? new Date(e.createdAt).toLocaleDateString("ar-EG",{year:"numeric",month:"2-digit",day:"2-digit"}) : "—"}</TD>
                   <TD color={C.textMuted}>{e.notes||"—"}</TD>
                   <td style={{ padding:"11px 14px" }}>
-                    <button onClick={()=>setConfirm({ msg:`حذف الموظف "${e.name}"؟`, onConfirm:()=>saveEmp(employees.filter(x=>x.id!==e.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                    <div style={{ display:"flex",gap:6 }}>
+                      <button onClick={()=>openEditEmp(e)} style={{ background:"none",border:"none",cursor:"pointer",color:C.accent }}><Ic d={I.edit} s={14} /></button>
+                      <button onClick={()=>setConfirm({ msg:`حذف الموظف "${e.name}"؟`, onConfirm:()=>saveEmp(employees.filter(x=>x.id!==e.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                    </div>
                   </td>
                 </TRow>
               ))}
@@ -3065,7 +3576,7 @@ function EmployeesPage() {
       )}
       {/* Modals */}
       {showModal && modalType==="employee" && (
-        <Modal title="إضافة موظف جديد" onClose={()=>setShowModal(false)}>
+        <Modal title={editingEmp ? "✏️ تعديل بيانات الموظف" : "إضافة موظف جديد"} onClose={()=>{setShowModal(false);setEditingEmp(null);setEmpForm({ name:"", position:"", baseSalary:"", phone:"", startDate:today(), notes:"" });}}>
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
               <Inp label="الاسم الكامل" value={empForm.name} onChange={v=>setEmpForm({...empForm,name:v})} required />
@@ -3076,8 +3587,8 @@ function EmployeesPage() {
             </div>
             <Inp label="ملاحظات" value={empForm.notes} onChange={v=>setEmpForm({...empForm,notes:v})} />
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
-              <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
-              <Btn onClick={handleSaveEmployee}>إضافة الموظف</Btn>
+              <Btn variant="ghost" onClick={()=>{setShowModal(false);setEditingEmp(null);setEmpForm({ name:"", position:"", baseSalary:"", phone:"", startDate:today(), notes:"" });}}>إلغاء</Btn>
+              <Btn onClick={handleSaveEmployee}>{editingEmp?"حفظ التعديلات":"إضافة الموظف"}</Btn>
             </div>
           </div>
         </Modal>
@@ -3442,6 +3953,196 @@ function CategoriesPage({ categories, onAdd }) {
   );
 }
 
+// ─── COMPANY SETTINGS PAGE ────────────────────────────────────────────────────
+function CompanySettingsPage({ userId, userEmail, companyName: initialCompanyName }) {
+  const [tab, setTab] = useState("general");
+  const [companyName, setCompanyName] = useState(initialCompanyName || "");
+  const [logo, setLogo] = useState(() => { try { return localStorage.getItem("company_logo_"+userId)||""; } catch { return ""; } });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState({ text:"", type:"" });
+  const [pwForm, setPwForm] = useState({ current:"", newPw:"", confirm:"" });
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwMsg, setPwMsg] = useState({ text:"", type:"" });
+
+  const showMsg = (text, type="success") => { setMsg({ text, type }); setTimeout(()=>setMsg({text:"",type:""}),3500); };
+  const showPwMsg = (text, type="success") => { setPwMsg({ text, type }); setTimeout(()=>setPwMsg({text:"",type:""}),3500); };
+
+  const handleSaveGeneral = async () => {
+    setSaving(true);
+    const { error } = await supabase.from("profiles").update({ company_name: companyName }).eq("id", userId);
+    if (!error) { showMsg("✓ تم حفظ بيانات الشركة"); }
+    else showMsg("خطأ: " + error.message, "error");
+    setSaving(false);
+  };
+
+  const handleLogoChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      setLogo(dataUrl);
+      try { localStorage.setItem("company_logo_"+userId, dataUrl); } catch {}
+      showMsg("✓ تم حفظ الشعار");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleChangePassword = async () => {
+    if (!pwForm.current) { showPwMsg("أدخل كلمة المرور الحالية", "error"); return; }
+    if (pwForm.newPw.length < 6) { showPwMsg("كلمة المرور الجديدة 6 أحرف على الأقل", "error"); return; }
+    if (pwForm.newPw !== pwForm.confirm) { showPwMsg("كلمتا المرور غير متطابقتين", "error"); return; }
+    setPwLoading(true);
+    // Verify current password first
+    const { error: signInErr } = await supabase.auth.signInWithPassword({ email: userEmail, password: pwForm.current });
+    if (signInErr) { showPwMsg("كلمة المرور الحالية غير صحيحة", "error"); setPwLoading(false); return; }
+    const { error } = await supabase.auth.updateUser({ password: pwForm.newPw });
+    if (!error) { showPwMsg("✓ تم تغيير كلمة المرور بنجاح"); setPwForm({ current:"", newPw:"", confirm:"" }); }
+    else showPwMsg("خطأ: " + error.message, "error");
+    setPwLoading(false);
+  };
+
+  const settingsTabs = [
+    { id:"general", label:"بيانات الشركة" },
+    { id:"password", label:"كلمة المرور" },
+  ];
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+      <PageHeader title="إعدادات الشركة" icon={I.settings} subtitle="إدارة بيانات الشركة وكلمة المرور" />
+      <div style={{ display:"flex",background:C.surface2,borderRadius:12,padding:4,border:`1px solid ${C.border}`,gap:4,width:"fit-content" }}>
+        {settingsTabs.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ background:tab===t.id?C.accent:"transparent",color:tab===t.id?"#fff":C.textMuted,border:"none",borderRadius:9,padding:"9px 22px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "general" && (
+        <Card>
+          <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+            {msg.text && <div style={{ background:msg.type==="success"?C.greenDim:C.redDim,border:`1px solid ${msg.type==="success"?C.green:C.red}33`,color:msg.type==="success"?C.green:C.red,borderRadius:10,padding:"10px 16px",fontSize:13,fontWeight:700 }}>{msg.text}</div>}
+            <div style={{ display:"flex",alignItems:"center",gap:20 }}>
+              <div style={{ width:80,height:80,borderRadius:16,background:C.surface2,border:`2px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",flexShrink:0 }}>
+                {logo ? <img src={logo} alt="شعار" style={{ width:"100%",height:"100%",objectFit:"cover" }} /> : <Ic d={I.factory} s={32} c={C.textMuted} />}
+              </div>
+              <div>
+                <div style={{ fontSize:13,fontWeight:600,color:C.text,marginBottom:8 }}>شعار الشركة</div>
+                <label style={{ background:C.accentDim,color:C.accent,border:`1px solid ${C.accent}33`,borderRadius:9,padding:"7px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+                  <Ic d={I.upload} s={13} /> اختيار صورة
+                  <input type="file" accept="image/*" onChange={handleLogoChange} style={{ display:"none" }} />
+                </label>
+                {logo && <button onClick={()=>{ setLogo(""); try { localStorage.removeItem("company_logo_"+userId); } catch {} }} style={{ marginRight:8,background:C.redDim,color:C.red,border:`1px solid ${C.red}33`,borderRadius:9,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>حذف</button>}
+              </div>
+            </div>
+            <Inp label="اسم الشركة" value={companyName} onChange={setCompanyName} placeholder="شركة النور للتجارة" />
+            <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 16px" }}>
+              <div style={{ fontSize:12,color:C.textMuted,marginBottom:4 }}>البريد الإلكتروني</div>
+              <div style={{ fontSize:14,fontWeight:700,color:C.textDim }}>{userEmail}</div>
+              <div style={{ fontSize:11,color:C.textMuted,marginTop:4 }}>لتغيير البريد الإلكتروني تواصل مع الإدارة</div>
+            </div>
+            <div style={{ display:"flex",justifyContent:"flex-end" }}>
+              <Btn onClick={handleSaveGeneral}>{saving?"جاري الحفظ...":"حفظ البيانات"}</Btn>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {tab === "password" && (
+        <Card>
+          <div style={{ display:"flex",flexDirection:"column",gap:16,maxWidth:420 }}>
+            {pwMsg.text && <div style={{ background:pwMsg.type==="success"?C.greenDim:C.redDim,border:`1px solid ${pwMsg.type==="success"?C.green:C.red}33`,color:pwMsg.type==="success"?C.green:C.red,borderRadius:10,padding:"10px 16px",fontSize:13,fontWeight:700 }}>{pwMsg.text}</div>}
+            <div style={{ background:C.accentDim,border:`1px solid ${C.accent}22`,borderRadius:12,padding:"12px 16px",fontSize:12,color:C.accent }}>
+              🔐 لتغيير كلمة المرور يجب إدخال كلمة المرور الحالية أولاً للتحقق من هويتك.
+            </div>
+            <Inp label="كلمة المرور الحالية" value={pwForm.current} onChange={v=>setPwForm({...pwForm,current:v})} placeholder="••••••••" />
+            <Inp label="كلمة المرور الجديدة" value={pwForm.newPw} onChange={v=>setPwForm({...pwForm,newPw:v})} placeholder="6 أحرف على الأقل" />
+            <Inp label="تأكيد كلمة المرور الجديدة" value={pwForm.confirm} onChange={v=>setPwForm({...pwForm,confirm:v})} placeholder="••••••••" />
+            {pwForm.newPw && (
+              <div style={{ fontSize:11,color:pwForm.newPw.length<6?C.red:pwForm.newPw.length<10?C.yellow:C.green,fontWeight:700 }}>
+                قوة كلمة المرور: {pwForm.newPw.length<6?"ضعيفة جداً":pwForm.newPw.length<10?"متوسطة":"قوية"}
+              </div>
+            )}
+            <div style={{ display:"flex",justifyContent:"flex-end" }}>
+              <Btn onClick={handleChangePassword}>{pwLoading?"جاري التغيير...":"تغيير كلمة المرور"}</Btn>
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION EXPIRY BELL ────────────────────────────────────────────────
+function SubscriptionExpiryBell({ days }) {
+  const [open, setOpen] = useState(false);
+  const color = days <= 3 ? C.red : days <= 7 ? C.yellow : C.blue;
+  const dimColor = days <= 3 ? C.redDim : days <= 7 ? C.yellowDim : C.blueDim;
+  const label = days === 0 ? "انتهى الاشتراك!" : days === 1 ? "يوم واحد متبقي" : `${days} يوم متبقي`;
+  return (
+    <div style={{ position:"relative" }}>
+      <button onClick={()=>setOpen(p=>!p)} style={{ background:dimColor,border:`1px solid ${color}33`,borderRadius:10,padding:"8px 12px",cursor:"pointer",color,display:"flex",alignItems:"center",gap:6,fontFamily:"inherit",fontSize:12,fontWeight:700 }}>
+        <Ic d={I.bell} s={15} c={color} />
+        <span style={{ background:color,color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:11,fontWeight:800 }}>{label}</span>
+      </button>
+      {open && (
+        <div style={{ position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:500,background:C.surface,border:`1px solid ${color}33`,borderRadius:16,padding:20,width:320,boxShadow:"0 8px 40px rgba(0,0,0,0.5)" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <span style={{ fontWeight:700,color,fontSize:13 }}>⚠ تنبيه الاشتراك</span>
+            <button onClick={()=>setOpen(false)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.close} s={14} /></button>
+          </div>
+          <div style={{ background:dimColor,border:`1px solid ${color}22`,borderRadius:12,padding:"14px 16px" }}>
+            <div style={{ fontWeight:800,color,fontSize:15,marginBottom:6 }}>
+              {days === 0 ? "❌ انتهت صلاحية اشتراكك" : `⏳ متبقي على انتهاء اشتراكك ${label}`}
+            </div>
+            <div style={{ fontSize:12,color:C.textMuted,lineHeight:1.7 }}>
+              يرجى التواصل مع الإدارة لتجديد الاشتراك واستمرار الخدمة بدون انقطاع.
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LOW STOCK NOTIFICATIONS ──────────────────────────────────────────────────
+function LowStockNotificationBell({ inventory }) {
+  const [open, setOpen] = useState(false);
+  const lowItems = inventory.filter(p => p.qty <= p.minQty);
+  if (!lowItems.length) return null;
+  return (
+    <div style={{ position:"relative" }}>
+      <button onClick={()=>setOpen(p=>!p)} style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:"8px 12px",cursor:"pointer",color:C.red,display:"flex",alignItems:"center",gap:6,fontFamily:"inherit",fontSize:12,fontWeight:700 }}>
+        <Ic d={I.bell} s={15} c={C.red} />
+        <span style={{ background:C.red,color:"#fff",borderRadius:"50%",width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,flexShrink:0 }}>{lowItems.length}</span>
+        {!open && "مخزون منخفض"}
+      </button>
+      {open && (
+        <div style={{ position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:500,background:C.surface,border:`1px solid ${C.red}33`,borderRadius:16,padding:16,width:320,boxShadow:`0 8px 40px rgba(0,0,0,0.5)` }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <span style={{ fontWeight:700,color:C.red,fontSize:13 }}>⚠ {lowItems.length} أصناف مخزونها منخفض</span>
+            <button onClick={()=>setOpen(false)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.close} s={14} /></button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,maxHeight:260,overflowY:"auto" }}>
+            {lowItems.map(p=>(
+              <div key={p.id} style={{ background:C.redDim,border:`1px solid ${C.red}22`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <div>
+                  <div style={{ fontWeight:700,color:C.text,fontSize:13 }}>{p.name}</div>
+                  <div style={{ fontSize:11,color:C.textMuted }}>{p.category}</div>
+                </div>
+                <div style={{ textAlign:"left" }}>
+                  <div style={{ fontSize:13,fontWeight:800,color:C.red,fontFamily:"monospace" }}>{p.qty} / {p.minQty}</div>
+                  <div style={{ fontSize:10,color:C.textMuted }}>الموجود / الحد الأدنى</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("dash");
@@ -3449,8 +4150,10 @@ export default function App() {
   const [userEmail, setUserEmail] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isActive, setIsActive] = useState(true);
+  const [daysUntilExpiry, setDaysUntilExpiry] = useState(null); // null = no expiry set
   const [subUser, setSubUser] = useState(null); // { id, owner_id, username, role, allowed_pages, can_add, can_delete, can_edit }
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mustSetPassword, setMustSetPassword] = useState(false); // first-login password setup
 
   // ── Auto-logout only when tab is closed or browser is closed (NOT on tab switch) ──
   useEffect(() => {
@@ -3473,11 +4176,26 @@ export default function App() {
     };
   }, []);
 
-  const checkSubscription = async (uid) => {
+  const checkSubscription = async (uid, retries = 3) => {
     if (!uid) return;
     try {
-      const { data: profile } = await supabase.from("profiles").select("is_active").eq("id", uid).single();
-      setIsActive(profile ? profile.is_active !== false : true);
+      const { data: profile, error } = await supabase.from("profiles").select("is_active, first_login, subscription_expires_at").eq("id", uid).single();
+      if ((error || !profile) && retries > 0) {
+        // Profile might not be written yet, retry after short delay
+        await new Promise(r => setTimeout(r, 1000));
+        return checkSubscription(uid, retries - 1);
+      }
+      let active = profile ? profile.is_active !== false : true;
+      if (active && profile?.subscription_expires_at) {
+        const expDate = new Date(profile.subscription_expires_at);
+        if (expDate < new Date()) { active = false; setDaysUntilExpiry(0); }
+        else {
+          const days = Math.ceil((expDate - new Date()) / (1000*60*60*24));
+          setDaysUntilExpiry(days);
+        }
+      } else { setDaysUntilExpiry(null); }
+      setIsActive(active);
+      if (profile?.first_login === true) setMustSetPassword(true);
     } catch { setIsActive(true); }
   };
 
@@ -3599,6 +4317,7 @@ export default function App() {
   if (!userId) return <LoginScreen onSubUserLogin={handleSubUserLogin} />;
   if (userEmail === ADMIN_EMAIL) return <AdminPanel />;
   if (!isActive) return <SubscriptionExpired />;
+  if (mustSetPassword) return <SetPasswordScreen userId={userId} userEmail={userEmail} onDone={()=>setMustSetPassword(false)} />;
 
   const navGroups = [
     { label:"الرئيسية", items:[{ id:"dash", label:"الرئيسية", icon:I.dash }] },
@@ -3632,13 +4351,14 @@ export default function App() {
   ];
 
   return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={actions} loading={loading}
-    userEmail={userEmail} onLogout={()=>supabase.auth.signOut()}
+    userEmail={userEmail} userId={userId} onLogout={()=>supabase.auth.signOut()}
     sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}
+    daysUntilExpiry={daysUntilExpiry}
   />;
 }
 
 // ─── APP SHELL (Sidebar + Content) ────────────────────────────────────────────
-function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail, onLogout, roleBadge, sidebarCollapsed, setSidebarCollapsed }) {
+function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail, userId, onLogout, roleBadge, sidebarCollapsed, setSidebarCollapsed, daysUntilExpiry }) {
   const W = sidebarCollapsed ? 68 : 230;
 
   const renderPage = () => {
@@ -3773,6 +4493,17 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
           *::-webkit-scrollbar-thumb:hover{background:${C.borderLight}}
           *{scrollbar-width:thin;scrollbar-color:${C.border} transparent}
         `}</style>
+        {/* Notification bars — top right */}
+        {(daysUntilExpiry !== null && daysUntilExpiry <= 30 || (data.inventory && data.inventory.some(p=>p.qty<=p.minQty))) && (
+          <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12,flexWrap:"wrap" }}>
+            {daysUntilExpiry !== null && daysUntilExpiry <= 30 && (
+              <SubscriptionExpiryBell days={daysUntilExpiry} />
+            )}
+            {data.inventory && data.inventory.some(p=>p.qty<=p.minQty) && (
+              <LowStockNotificationBell inventory={data.inventory} />
+            )}
+          </div>
+        )}
         {renderPage()}
       </div>
     </div>
