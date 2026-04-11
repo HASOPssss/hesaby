@@ -1,7 +1,17 @@
 import { useState, useMemo } from "react";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
-const C = {
+const getColors = (theme = "dark") => theme === "light" ? {
+  bg: "#f0f2f8", surface: "#ffffff", surface2: "#f5f7ff", surface3: "#eef0f8",
+  border: "#d1d5e8", borderLight: "#c8ccdf",
+  accent: "#4f5fd4", accentDim: "rgba(79,95,212,0.1)",
+  green: "#059669", greenDim: "rgba(5,150,105,0.1)",
+  red: "#dc2626", redDim: "rgba(220,38,38,0.1)",
+  yellow: "#d97706", yellowDim: "rgba(217,119,6,0.1)",
+  blue: "#2563eb", blueDim: "rgba(37,99,235,0.1)",
+  purple: "#7c3aed", purpleDim: "rgba(124,58,237,0.1)",
+  text: "#1e2240", textMuted: "#64748b", textDim: "#475569",
+} : {
   bg: "#070810", surface: "#0e1020", surface2: "#151829", surface3: "#1c2036",
   border: "#1e2238", borderLight: "#252a45",
   accent: "#6c7fff", accentDim: "rgba(108,127,255,0.1)",
@@ -12,6 +22,7 @@ const C = {
   purple: "#a78bfa", purpleDim: "rgba(167,139,250,0.1)",
   text: "#e2e8f0", textMuted: "#475569", textDim: "#94a3b8",
 };
+let C = getColors("dark");
 
 const I = {
   tax: "M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M9 15l2 2 4-4",
@@ -57,7 +68,7 @@ const THead = ({ cols }) => (
 );
 
 const TRow = ({ children, alt }) => (
-  <tr style={{ borderBottom: `1px solid ${C.border}20`, background: alt ? "rgba(255,255,255,0.015)" : "transparent" }}>{children}</tr>
+  <tr style={{ borderBottom: `1px solid ${C.border}`, background: alt ? C.surface2 : "transparent" }}>{children}</tr>
 );
 
 const TD = ({ children, color, mono = false }) => (
@@ -140,7 +151,8 @@ const printTaxInvoice = (inv) => {
 };
 
 // ─── TAX INVOICES PAGE ────────────────────────────────────────────────────────
-export default function TaxInvoicesPage({ salesInvoices, purchaseInvoices }) {
+export default function TaxInvoicesPage({ salesInvoices, purchaseInvoices, theme = "dark" }) {
+  C = getColors(theme);
   const [selectedMonth, setSelectedMonth] = useState(today().slice(0, 7));
   const [activeTab, setActiveTab] = useState("sales"); // sales | purchases | summary
   const [search, setSearch] = useState("");
