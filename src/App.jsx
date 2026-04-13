@@ -4151,14 +4151,18 @@ function EmployeesPage() {
       const newSals = (arch.salaries||[]).filter(s=>!existingSalIds.has(s.id));
       saveSal([...salaries, ...newSals]);
 
-      // رجّع الخصومات — تفضل عليها settled (مسددة)
+      // رجّع الخصومات — كلها مسددة لأنها دخلت الأرشيف
       const existingAttIds = new Set(attendance.map(a=>a.id));
-      const newAtt = (arch.attendance||[]).filter(a=>!existingAttIds.has(a.id));
+      const newAtt = (arch.attendance||[])
+        .filter(a=>!existingAttIds.has(a.id))
+        .map(a=>({ ...a, settled: true }));
       saveAtt([...attendance, ...newAtt]);
 
-      // رجّع السلف — تفضل status "مسدد"
+      // رجّع السلف — كلها مسدد لأنها دخلت الأرشيف
       const existingAdvIds = new Set(advances.map(a=>a.id));
-      const newAdvs = (arch.advances||[]).filter(a=>!existingAdvIds.has(a.id));
+      const newAdvs = (arch.advances||[])
+        .filter(a=>!existingAdvIds.has(a.id))
+        .map(a=>({ ...a, status: "مسدد" }));
       saveAdv([...advances, ...newAdvs]);
 
       // احذف من الأرشيف
