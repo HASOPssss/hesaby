@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ReturnsPage from "./ReturnsPage";
 import RevenuePage from "./RevenuePage";
@@ -347,6 +347,30 @@ const fmtNum = (n) => (n ?? 0).toLocaleString("ar-EG");
 const today = () => new Date().toISOString().split("T")[0];
 const getMonth = (d) => d?.slice(0, 7);
 
+// ─── PRINT HELPER ─────────────────────────────────────────────────────────────
+// window.open triggers pagehide on the parent → React freezes / signs out.
+// Fix: use a hidden iframe inside the same page instead.
+const openPrint = (html) => {
+  const existingFrame = document.getElementById("__print_frame__");
+  if (existingFrame) existingFrame.remove();
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "__print_frame__";
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  iframe.contentWindow.focus();
+  iframe.contentWindow.print();
+
+  // نشيل الـ iframe بعد ما الطباعة تخلص
+  setTimeout(() => { if (iframe.parentNode) iframe.remove(); }, 2000);
+};
+
 // ─── PRINT INVOICE ────────────────────────────────────────────────────────────
 const getCompanyBranding = () => {
   try {
@@ -401,9 +425,7 @@ const printInvoice = (inv, type) => {
   <div class="total-row main"><span>الإجمالي الكلي</span><span>${inv.amount.toLocaleString("ar-EG")} ج.م</span></div></div>
   <div class="footer">${companyName} — طُبعت بتاريخ ${printDateTime}</div>
   </body></html>`;
-  const w = window.open("", "_blank");
-  w.document.write(html); w.document.close(); w.focus();
-  setTimeout(() => w.print(), 500);
+  openPrint(html);
 };
 
 // ─── PRINT TAX INVOICE ────────────────────────────────────────────────────────
@@ -449,9 +471,7 @@ const printTaxInvoice = (inv) => {
   <div class="total-row" style="color:#ef4444"><span>المتبقي</span><span>${(inv.amount-(inv.paid||0)).toLocaleString("ar-EG")} ج.م</span></div></div>
   <div class="tax-note">📋 هذه فاتورة ضريبية رسمية تشمل ضريبة القيمة المضافة وفقاً للتشريعات المعمول بها.</div>
   <div class="footer">${companyName} — طُبعت بتاريخ ${printDateTime}</div></body></html>`;
-  const w = window.open("", "_blank");
-  w.document.write(html); w.document.close(); w.focus();
-  setTimeout(() => w.print(), 500);
+  openPrint(html);
 };
 
 // ─── PRINT STOCKTAKE REPORT ───────────────────────────────────────────────────
@@ -492,9 +512,7 @@ const printStocktakeReport = (inventory, period, selectedMonth) => {
   ${inventory.map(p=>`<tr><td>${p.id}</td><td>${p.name}</td><td>${p.category}</td><td class="${p.qty<=p.minQty?"low":"ok"}">${p.qty} ${p.unit}</td><td>${p.minQty}</td><td class="${p.qty<=p.minQty?"low":"ok"}">${Math.max(0,p.minQty-p.qty)}</td><td>${p.cost.toLocaleString("ar-EG")} ج.م</td><td>${(p.qty*p.cost).toLocaleString("ar-EG")} ج.م</td><td class="${p.qty<=p.minQty?"low":"ok"}">${p.qty<=p.minQty?"منخفض":"كافي"}</td></tr>`).join("")}
   </tbody></table>
   <div class="footer">تقرير الجرد — ${companyName} — ${new Date().toLocaleString("ar-EG",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</div></body></html>`;
-  const w = window.open("", "_blank");
-  w.document.write(html); w.document.close(); w.focus();
-  setTimeout(() => w.print(), 500);
+  openPrint(html);
 };
 
 // ─── PRINT FINANCIAL REPORT ───────────────────────────────────────────────────
@@ -536,9 +554,7 @@ const printFinancialReport = (data, period, selectedMonth) => {
   ${filteredPurchases.map(i=>`<tr><td>${i.id}</td><td>${i.date}</td><td>${i.supplier}</td><td>${i.amount.toLocaleString("ar-EG")} ج.م</td><td>${i.paid.toLocaleString("ar-EG")} ج.م</td><td>${(i.amount-i.paid).toLocaleString("ar-EG")} ج.م</td><td>${i.status}</td></tr>`).join("")}
   </tbody></table>
   <div class="footer">التقرير المالي — ${companyName} — ${new Date().toLocaleString("ar-EG",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</div></body></html>`;
-  const w = window.open("", "_blank");
-  w.document.write(html); w.document.close(); w.focus();
-  setTimeout(() => w.print(), 500);
+  openPrint(html);
 };
 
 // ─── EXCEL HELPERS ────────────────────────────────────────────────────────────
@@ -683,6 +699,204 @@ const Btn = ({ children, onClick, variant="primary", small=false, style={} }) =>
     </button>
   );
 };
+
+// ─── CUSTOM DATE PICKER ───────────────────────────────────────────────────────
+function DatePicker({ label, value, onChange, required=false }) {
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(() => value ? parseInt(value.split("-")[0]) : new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => value ? parseInt(value.split("-")[1])-1 : new Date().getMonth());
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (value) {
+      setViewYear(parseInt(value.split("-")[0]));
+      setViewMonth(parseInt(value.split("-")[1])-1);
+    }
+  }, [value]);
+
+  const monthNames = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+  const dayNames = ["أح","إث","ث","أر","خ","ج","س"];
+
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+  const daysInPrev = new Date(viewYear, viewMonth, 0).getDate();
+
+  const cells = [];
+  for (let i=firstDay-1; i>=0; i--) cells.push({ day: daysInPrev-i, cur:false });
+  for (let d=1; d<=daysInMonth; d++) cells.push({ day:d, cur:true });
+  while (cells.length % 7 !== 0) cells.push({ day: cells.length - daysInMonth - firstDay + 1, cur:false });
+
+  const selYear = value ? parseInt(value.split("-")[0]) : null;
+  const selMonth = value ? parseInt(value.split("-")[1])-1 : null;
+  const selDay = value ? parseInt(value.split("-")[2]) : null;
+
+  const selectDay = (d) => {
+    const m = String(viewMonth+1).padStart(2,"0");
+    const dy = String(d).padStart(2,"0");
+    onChange(`${viewYear}-${m}-${dy}`);
+    setOpen(false);
+  };
+
+  const prevMonth = () => { if (viewMonth===0) { setViewMonth(11); setViewYear(y=>y-1); } else setViewMonth(m=>m-1); };
+  const nextMonth = () => { if (viewMonth===11) { setViewMonth(0); setViewYear(y=>y+1); } else setViewMonth(m=>m+1); };
+
+  const displayValue = value ? new Date(value+"T00:00:00").toLocaleDateString("ar-EG", {year:"numeric",month:"2-digit",day:"2-digit"}) : "";
+
+  return (
+    <div ref={ref} style={{ display:"flex",flexDirection:"column",gap:5,position:"relative" }}>
+      {label && <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{label}{required && <span style={{ color:C.red }}> *</span>}</label>}
+      <button type="button" onClick={()=>setOpen(p=>!p)} style={{
+        background:C.bg, border:`1px solid ${open?C.accent:C.border}`, borderRadius:9, padding:"9px 13px",
+        color: value ? C.text : C.textMuted, fontSize:13, fontFamily:"inherit", cursor:"pointer",
+        display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, textAlign:"right",
+        transition:"border-color 0.2s", width:"100%",
+      }}>
+        <span>{displayValue || "اختر تاريخ"}</span>
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position:"absolute", top:"calc(100% + 6px)", right:0, zIndex:9999,
+          background:C.surface, border:`1px solid ${C.borderLight}`, borderRadius:16,
+          boxShadow:"0 12px 48px rgba(0,0,0,0.5)", padding:16, width:280, direction:"rtl",
+        }}>
+          {/* Header */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+            <button onClick={prevMonth} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted,padding:4,borderRadius:8,display:"flex" }}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span style={{ fontWeight:700, color:C.text, fontSize:14 }}>{monthNames[viewMonth]} {viewYear}</span>
+            <button onClick={nextMonth} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted,padding:4,borderRadius:8,display:"flex" }}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
+          {/* Day names */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:6 }}>
+            {dayNames.map(d=>(
+              <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:C.textMuted, padding:"4px 0" }}>{d}</div>
+            ))}
+          </div>
+          {/* Days */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+            {cells.map((c,i)=>{
+              const isSelected = c.cur && selYear===viewYear && selMonth===viewMonth && selDay===c.day;
+              const isToday = c.cur && new Date().getFullYear()===viewYear && new Date().getMonth()===viewMonth && new Date().getDate()===c.day;
+              return (
+                <button key={i} onClick={()=>c.cur && selectDay(c.day)} style={{
+                  background: isSelected ? C.accent : isToday ? C.accentDim : "transparent",
+                  color: isSelected ? "#fff" : c.cur ? C.text : C.textMuted,
+                  border: isToday && !isSelected ? `1px solid ${C.accent}` : "1px solid transparent",
+                  borderRadius:8, padding:"6px 2px", fontSize:12, fontWeight:isSelected?700:500,
+                  cursor:c.cur?"pointer":"default", fontFamily:"inherit", transition:"all 0.15s",
+                  opacity: c.cur ? 1 : 0.3,
+                }} onMouseEnter={e=>{ if(c.cur&&!isSelected) e.target.style.background=C.accentDim; }}
+                   onMouseLeave={e=>{ if(c.cur&&!isSelected) e.target.style.background="transparent"; }}>
+                  {c.day}
+                </button>
+              );
+            })}
+          </div>
+          {/* Footer */}
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:12, paddingTop:10, borderTop:`1px solid ${C.border}` }}>
+            <button onClick={()=>{ onChange(""); setOpen(false); }} style={{ background:"none",border:"none",cursor:"pointer",color:C.red,fontSize:12,fontWeight:600,fontFamily:"inherit" }}>مسح</button>
+            <button onClick={()=>{ const t=new Date(); selectDay(t.getDate()); setViewYear(t.getFullYear()); setViewMonth(t.getMonth()); }} style={{ background:"none",border:"none",cursor:"pointer",color:C.accent,fontSize:12,fontWeight:600,fontFamily:"inherit" }}>اليوم</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CUSTOM MONTH PICKER ──────────────────────────────────────────────────────
+function MonthPicker({ label, value, onChange, required=false }) {
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(() => value ? parseInt(value.split("-")[0]) : new Date().getFullYear());
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const monthNames = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+  const selYear = value ? parseInt(value.split("-")[0]) : null;
+  const selMonth = value ? parseInt(value.split("-")[1])-1 : null;
+
+  const selectMonth = (mi) => {
+    onChange(`${viewYear}-${String(mi+1).padStart(2,"0")}`);
+    setOpen(false);
+  };
+
+  const displayValue = value ? `${monthNames[parseInt(value.split("-")[1])-1]} ${value.split("-")[0]}` : "";
+
+  return (
+    <div ref={ref} style={{ display:"flex",flexDirection:"column",gap:5,position:"relative" }}>
+      {label && <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{label}{required && <span style={{ color:C.red }}> *</span>}</label>}
+      <button type="button" onClick={()=>setOpen(p=>!p)} style={{
+        background:C.bg, border:`1px solid ${open?C.accent:C.border}`, borderRadius:9, padding:"9px 13px",
+        color: value ? C.text : C.textMuted, fontSize:13, fontFamily:"inherit", cursor:"pointer",
+        display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, textAlign:"right",
+        transition:"border-color 0.2s", width:"100%",
+      }}>
+        <span>{displayValue || "اختر شهر"}</span>
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={C.textMuted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position:"absolute", top:"calc(100% + 6px)", right:0, zIndex:9999,
+          background:C.surface, border:`1px solid ${C.borderLight}`, borderRadius:16,
+          boxShadow:"0 12px 48px rgba(0,0,0,0.5)", padding:16, width:260, direction:"rtl",
+        }}>
+          {/* Year nav */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+            <button onClick={()=>setViewYear(y=>y-1)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted,padding:4,borderRadius:8,display:"flex" }}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span style={{ fontWeight:700, color:C.text, fontSize:15 }}>{viewYear}</span>
+            <button onClick={()=>setViewYear(y=>y+1)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted,padding:4,borderRadius:8,display:"flex" }}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
+          {/* Months grid */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
+            {monthNames.map((mn,mi)=>{
+              const isSelected = selYear===viewYear && selMonth===mi;
+              const isCurrentMonth = new Date().getFullYear()===viewYear && new Date().getMonth()===mi;
+              return (
+                <button key={mi} onClick={()=>selectMonth(mi)} style={{
+                  background: isSelected ? C.accent : isCurrentMonth ? C.accentDim : C.surface2,
+                  color: isSelected ? "#fff" : C.text,
+                  border: isCurrentMonth && !isSelected ? `1px solid ${C.accent}` : `1px solid ${C.border}`,
+                  borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:isSelected?700:500,
+                  cursor:"pointer", fontFamily:"inherit", transition:"all 0.15s",
+                }} onMouseEnter={e=>{ if(!isSelected) e.target.style.background=C.accentDim; }}
+                   onMouseLeave={e=>{ if(!isSelected) e.target.style.background=isCurrentMonth?C.accentDim:C.surface2; }}>
+                  {mn}
+                </button>
+              );
+            })}
+          </div>
+          {/* Footer */}
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:12, paddingTop:10, borderTop:`1px solid ${C.border}` }}>
+            <button onClick={()=>{ onChange(""); setOpen(false); }} style={{ background:"none",border:"none",cursor:"pointer",color:C.red,fontSize:12,fontWeight:600,fontFamily:"inherit" }}>مسح</button>
+            <button onClick={()=>{ const t=new Date(); selectMonth(t.getMonth()); setViewYear(t.getFullYear()); }} style={{ background:"none",border:"none",cursor:"pointer",color:C.accent,fontSize:12,fontWeight:600,fontFamily:"inherit" }}>هذا الشهر</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const Inp = ({ label, value, onChange, type="text", placeholder="", required=false }) => (
   <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
@@ -893,16 +1107,16 @@ function LoginScreen({ onSubUserLogin }) {
       // Save last email
       try { localStorage.setItem("last_login_email", form.email); } catch {}
       // First attempt: normal login with entered password
-      const { error } = await supabase.auth.signInWithPassword({ email:form.email, password:form.password });
+      const { error } = await supabase.auth.signInWithPassword({ email:form.email.toLowerCase().trim(), password:form.password });
       if (!error) { setLoading(false); return; }
 
       // If failed, check if this is a first-login account (use temp_password)
       if (error.message.includes("Invalid login credentials")) {
         const { data: profileData } = await supabase
-          .from("profiles").select("first_login, temp_password").eq("email", form.email).single();
+          .from("profiles").select("first_login, temp_password").eq("email", form.email.toLowerCase().trim()).single();
         if (profileData?.first_login && profileData?.temp_password) {
           // Try with temp password (admin-set password)
-          const { error: err2 } = await supabase.auth.signInWithPassword({ email:form.email, password:profileData.temp_password });
+          const { error: err2 } = await supabase.auth.signInWithPassword({ email:form.email.toLowerCase().trim(), password:profileData.temp_password });
           if (!err2) { setLoading(false); return; } // success — App will detect first_login and show SetPasswordScreen
         }
         setErr("البريد الإلكتروني أو كلمة المرور غير صحيحة");
@@ -1267,7 +1481,7 @@ function AdminPanel() {
       email: u.email || "",
       company_name: u.company_name || "",
       subscription_expires_at: u.subscription_expires_at ? u.subscription_expires_at.split("T")[0] : "",
-      allowed_pages: u.allowed_pages || ALL_PAGES.map(p=>p.id),
+      allowed_pages: Array.isArray(u.allowed_pages) ? u.allowed_pages : ALL_PAGES.map(p=>p.id),
     });
   };
 
@@ -1859,9 +2073,7 @@ function AdminPanel() {
               <Inp label="اسم الشركة" value={editCompanyForm.company_name} onChange={v=>setEditCompanyForm({...editCompanyForm,company_name:v})} placeholder="شركة النور للتجارة" />
               <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
                 <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>تاريخ انتهاء الاشتراك</label>
-                <input type="date" value={editCompanyForm.subscription_expires_at} onChange={e=>setEditCompanyForm({...editCompanyForm,subscription_expires_at:e.target.value})}
-                  style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}
-                  onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
+                <DatePicker value={editCompanyForm.subscription_expires_at} onChange={v=>setEditCompanyForm({...editCompanyForm,subscription_expires_at:v})} />
                 {editCompanyForm.subscription_expires_at && (() => {
                   const days = Math.ceil((new Date(editCompanyForm.subscription_expires_at) - new Date())/(1000*60*60*24));
                   return <div style={{ fontSize:11,color:days<=7?C.yellow:C.green,fontWeight:600 }}>{days > 0 ? `متبقي ${days} يوم` : "منتهي الصلاحية"}</div>;
@@ -2119,7 +2331,7 @@ function LiveClock() {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ data }) {
+function Dashboard({ data, daysUntilExpiry, inventory }) {
   const totalSales = data.salesInvoices.reduce((s,i)=>s+i.amount,0);
   const totalPurchases = data.purchaseInvoices.reduce((s,i)=>s+i.amount,0);
   const totalReceivable = data.salesInvoices.reduce((s,i)=>s+(i.amount-i.paid),0);
@@ -2139,12 +2351,15 @@ function Dashboard({ data }) {
 
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:26 }}>
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
         <div>
           <h1 style={{ margin:0,fontSize:24,fontWeight:800,color:C.text,letterSpacing:-0.5 }}>لوحة التحكم</h1>
           <p style={{ margin:"5px 0 0",color:C.textMuted,fontSize:13 }}>نظرة عامة شاملة على الأداء المالي</p>
         </div>
-        <LiveClock />
+        <div style={{ display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8 }}>
+          <LiveClock />
+          <UnifiedNotificationBell days={daysUntilExpiry} inventory={inventory||[]} />
+        </div>
       </div>
       <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14 }}>
         {bigStats.map(s=>(
@@ -2280,7 +2495,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:18 }}>
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-        <Inp label="التاريخ" type="date" value={form.date} onChange={v=>setForm({...form,date:v})} />
+        <DatePicker label="التاريخ" value={form.date} onChange={v=>setForm({...form,date:v})} />
         {/* Client/Supplier selector with quick-add */}
         <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
@@ -2317,7 +2532,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
         <Inp label={isS?"المدفوع مقدماً":"المدفوع"} type="number" value={form.paid} onChange={v=>setForm({...form,paid:v})} placeholder="0" />
         <Sel label="طريقة الدفع" value={form.paymentMethod} onChange={v=>setForm({...form,paymentMethod:v})} options={[{value:"نقدي",label:"💵 نقدي"},{value:"شيك",label:"📄 شيك"},{value:"تحويل",label:"🏦 تحويل بنكي"},{value:"فيزا",label:"💳 فيزا"}]} />
         {form.paymentMethod==="شيك" && <Inp label="رقم الشيك" value={form.checkNumber} onChange={v=>setForm({...form,checkNumber:v})} placeholder="رقم الشيك..." />}
-        {form.paymentMethod==="شيك" && <Inp label="تاريخ الشيك" type="date" value={form.checkDate} onChange={v=>setForm({...form,checkDate:v})} />}
+        {form.paymentMethod==="شيك" && <DatePicker label="تاريخ الشيك" value={form.checkDate} onChange={v=>setForm({...form,checkDate:v})} />}
       </div>
       <div>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
@@ -2833,9 +3048,7 @@ function UnifiedReportsPage({ data, userEmail }) {
     setDailyArchive(updated);
     localStorage.setItem("daily_reports_archive", JSON.stringify(updated));
     // Download PDF via print
-    const w = window.open("","_blank");
-    w.document.write(html); w.document.close(); w.focus();
-    setTimeout(()=>w.print(),500);
+    openPrint(html);
     setConfirmClose(false);
   };
 
@@ -2849,9 +3062,7 @@ function UnifiedReportsPage({ data, userEmail }) {
 
   // Download archived report
   const downloadArchive = (html, filename) => {
-    const w = window.open("","_blank");
-    w.document.write(html); w.document.close(); w.focus();
-    setTimeout(()=>w.print(),500);
+    openPrint(html);
   };
 
   // Data for selected date (daily view)
@@ -2933,8 +3144,7 @@ function UnifiedReportsPage({ data, userEmail }) {
       {viewMode==="daily" && (
         <div style={{ display:"flex",flexDirection:"column",gap:18 }}>
           <div style={{ display:"flex",gap:12,alignItems:"center" }}>
-            <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}
-              style={{ background:C.surface2,border:`1px solid ${isDayClosed?C.yellow:C.border}`,borderRadius:9,padding:"9px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }} />
+            <DatePicker value={selectedDate} onChange={v=>setSelectedDate(v)} />
             {isDayClosed && (
               <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}33`,borderRadius:9,padding:"8px 14px",fontSize:12,color:C.yellow,fontWeight:700 }}>
                 🔒 هذا اليوم مُغلق
@@ -3416,8 +3626,7 @@ function InventoryPage({ inventory, categories, onAdd, onEdit, onDelete, onBulkA
           </select>
           <div style={{ marginRight:"auto",display:"flex",gap:8 }}>
             <span style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>جرد شهري</span>
-            <input type="month" value={stocktakeMonth} onChange={e=>setStocktakeMonth(e.target.value)}
-              style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none" }} />
+            <MonthPicker value={stocktakeMonth} onChange={v=>setStocktakeMonth(v)} />
             <Btn variant="success" small onClick={()=>printStocktakeReport(filtered,stocktakePeriod,stocktakeMonth)}>
               <Ic d={I.print} s={12} />طباعة الجرد
             </Btn>
@@ -3504,8 +3713,7 @@ function StocktakePage({ inventory, categories }) {
             شهري
           </button>
         </div>
-        <input type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
-          style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none" }} />
+        <MonthPicker value={selectedMonth} onChange={v=>setSelectedMonth(v)} />
         <select value={catFilter} onChange={e=>setCatFilter(e.target.value)}
           style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
           <option value="">كل الفئات</option>
@@ -3663,7 +3871,7 @@ const printSalarySlip = (sal, emp, attList, advList) => {
   ${sal.notes?`<div style="background:#f8faff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#475569"><strong>ملاحظات:</strong> ${sal.notes}</div>`:""}
   <div class="footer">${companyName} — قسيمة مرتب ${sal.employeeName} — ${sal.month} — طُبعت ${printDateTime}</div>
   </body></html>`;
-  const w = window.open("","_blank"); w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>w.print(),500);
+  openPrint(html);
 };
 
 // ─── PRINT ALL SALARIES ────────────────────────────────────────────────────────
@@ -3717,7 +3925,7 @@ const printAllSalaries = (salaries, employees, attendance, advances, month) => {
   <tr style="background:#eff6ff;font-weight:800"><td colspan="2">الإجمالي</td><td style="font-family:monospace">${totalBase.toLocaleString("ar-EG")} ج.م</td><td colspan="6"></td><td style="font-family:monospace;color:#6c7fff">${totalNet.toLocaleString("ar-EG")} ج.م</td><td colspan="2"></td></tr>
   </tbody></table>
   <div class="footer">${companyName} — كشف المرتبات — ${printDateTime}</div></body></html>`;
-  const w = window.open("","_blank"); w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>w.print(),500);
+  openPrint(html);
 };
 
 // ─── EMPLOYEES PAGE ───────────────────────────────────────────────────────────
@@ -3751,6 +3959,9 @@ function EmployeesPage() {
   const [attForm, setAttForm] = useState({ employeeId:"", date:today(), type:"غياب", reason:"", deductAmount:"" });
   const [advForm, setAdvForm] = useState({ employeeId:"", date:today(), amount:"", reason:"", status:"قيد السداد" });
   const [archiveMonth, setArchiveMonth] = useState(today().slice(0,7));
+  const [empMsg, setEmpMsg] = useState({ text:"", type:"success" });
+  const showEmpMsg = (text, type="success") => { setEmpMsg({text,type}); setTimeout(()=>setEmpMsg({text:"",type:"success"}),3500); };
+  const [lastPaidSal, setLastPaidSal] = useState(null); // آخر مرتب اتصرف — لعرض زرار الطباعة
 
   const saveEmp = (list) => { setEmployees(list); localStorage.setItem("employees_local", JSON.stringify(list)); };
   const saveSal = (list) => { setSalaries(list); localStorage.setItem("salaries_local", JSON.stringify(list)); };
@@ -3801,6 +4012,20 @@ function EmployeesPage() {
   const handleSaveSalary = () => {
     if (!salForm.employeeId) return;
     const emp = employees.find(e=>e.id===salForm.employeeId);
+
+    // ✋ منع صرف مرتب في شهر مأرشف
+    if (archivedMonths.has(salForm.month)) {
+      showPermissionToast(`شهر ${salForm.month} مأرشف — احذف الأرشيف أولاً للتعديل`, "error");
+      return;
+    }
+
+    // ✋ منع صرف نفس الموظف مرتين في نفس الشهر
+    const duplicate = salaries.find(s=>s.employeeId===salForm.employeeId && s.month===salForm.month);
+    if (duplicate) {
+      showPermissionToast(`تم صرف مرتب "${emp?.name}" عن ${salForm.month} من قبل`, "error");
+      return;
+    }
+
     const base = parseFloat(salForm.baseSalary)||(emp?.baseSalary||0);
     const bonus = parseFloat(salForm.bonus)||0;
     const deductions = parseFloat(salForm.deductions)||0;
@@ -3819,13 +4044,32 @@ function EmployeesPage() {
       dailyRate, deductAbsence, deductLeave, deductLate, deductOther, deductAdvances, totalDeductions,
       absCount, leaveCount, lateCount, paidAt
     };
-    saveSal([...salaries, newSal]);
-    // تحديث حالة السلف المخصومة إلى "مسدد"
-    if (selectedAdvIds.length>0) {
-      saveAdv(advances.map(a=>selectedAdvIds.includes(a.id)?{...a,status:"مسدد",deductedInSalary:salId}:a));
+    const updatedSalaries = [...salaries, newSal];
+    saveSal(updatedSalaries);
+
+    // ① علّم خصومات هذا الموظف في هذا الشهر كـ "مسددة" بدل حذفها
+    const updatedAtt = attendance.map(a =>
+      (a.employeeId===salForm.employeeId && a.date?.startsWith(salForm.month))
+        ? { ...a, settled: true, settledInSalary: salId }
+        : a
+    );
+    saveAtt(updatedAtt);
+
+    // ② علّم السلف المخصومة كـ "مسددة" بدل حذفها
+    if (selectedAdvIds.length > 0) {
+      saveAdv(advances.map(a =>
+        selectedAdvIds.includes(a.id)
+          ? { ...a, status: "مسدد", settledInSalary: salId }
+          : a
+      ));
     }
+
     setShowModal(false);
     setSalForm({ employeeId:"", month:today().slice(0,7), baseSalary:"", bonus:"", deductions:"", notes:"", paymentMethod:"نقدي", workingDays:"26", lateDeductPerTime:"", advancesToDeduct:[] });
+
+    // احفظ آخر مرتب عشان زرار الطباعة — المستخدم يطبع لما يريد بدون freeze
+    setLastPaidSal({ sal: newSal, emp, attSnapshot: attendance, advSnapshot: advancesDeducted });
+    showPermissionToast(`✅ تم صرف مرتب ${emp?.name||""} — ${newSal.month}`, "success");
   };
 
   const handleSaveAttendance = () => {
@@ -3847,24 +4091,45 @@ function EmployeesPage() {
   // أرشفة مرتبات شهر
   const handleArchiveMonth = (month) => {
     const monthSals = salaries.filter(s=>s.month===month);
-    if (monthSals.length===0) { alert("لا توجد مرتبات لهذا الشهر"); return; }
+    if (monthSals.length===0) { showEmpMsg("لا توجد مرتبات لهذا الشهر", "error"); return; }
     const existing = salaryArchive.find(a=>a.month===month);
-    if (existing) { if (!window.confirm("يوجد أرشيف لهذا الشهر مسبقاً، هل تريد تحديثه؟")) return; }
+    if (existing) {
+      setConfirm({ msg:`يوجد أرشيف لشهر ${month} مسبقاً، هل تريد تحديثه؟`, onConfirm: () => {
+        doArchive(month, monthSals);
+        setConfirm(null);
+      }});
+      return;
+    }
+    doArchive(month, monthSals);
+  };
+
+  const doArchive = (month, monthSals) => {
+    // كل الخصومات والسلف الخاصة بموظفي هذا الشهر
+    const empIds = new Set(monthSals.map(s=>s.employeeId));
+    const monthAtt = attendance.filter(a=>a.date?.startsWith(month) && empIds.has(a.employeeId));
+    const salIds = new Set(monthSals.map(s=>s.id));
+    const monthAdvs = advances.filter(a=>empIds.has(a.employeeId) && (a.settledInSalary && salIds.has(a.settledInSalary)));
+
     const archiveEntry = {
       month, archivedAt: new Date().toISOString(),
       salaries: monthSals,
-      attendance: attendance.filter(a=>a.date?.startsWith(month)),
-      advances: advances.filter(a=>a.deductedInSalary && monthSals.find(s=>s.id===a.deductedInSalary)),
+      attendance: monthAtt,
+      advances: monthAdvs,
       totalNet: monthSals.reduce((s,x)=>s+x.netSalary,0),
       totalDeductions: monthSals.reduce((s,x)=>s+(x.totalDeductions||0),0),
       empCount: monthSals.length,
     };
     const updatedArchive = salaryArchive.filter(a=>a.month!==month);
     saveArchive([...updatedArchive, archiveEntry]);
-    // حذف المرتبات المُأرشفة من القائمة العادية نهائياً
-    const updatedSalaries = salaries.filter(s=>s.month!==month);
-    saveSal(updatedSalaries);
-    alert(`✅ تم أرشفة مرتبات ${month} بنجاح (${monthSals.length} موظف) وإزالتها من كشف المرتبات`);
+
+    // احذف المرتبات والخصومات والسلف من القوائم الأصلية
+    saveSal(salaries.filter(s=>s.month!==month));
+    saveAtt(attendance.filter(a=>!(a.date?.startsWith(month) && empIds.has(a.employeeId))));
+    const attIds = new Set(monthAtt.map(a=>a.id));
+    const advIds = new Set(monthAdvs.map(a=>a.id));
+    saveAdv(advances.filter(a=>!advIds.has(a.id)));
+
+    showPermissionToast(`✅ تم أرشفة مرتبات ${month} (${monthSals.length} موظف)`, "success");
   };
 
   const handleDeleteArchive = (month, label) => {
@@ -3873,6 +4138,33 @@ function EmployeesPage() {
       saveArchive(salaryArchive.filter(a=>a.month!==month));
       // لا نعيد المرتبات للقائمة العادية — الأرشيف للحفظ فقط
       setConfirm(null);
+    }});
+  };
+
+  const handleRestoreArchive = (month, label) => {
+    setConfirm({ msg:`استرداد أرشيف ${label}؟ ستعود المرتبات والخصومات والسلف للقوائم العادية.`, onConfirm: () => {
+      const arch = salaryArchive.find(a=>a.month===month);
+      if (!arch) { setConfirm(null); return; }
+
+      // رجّع المرتبات (تجنب تكرار)
+      const existingSalIds = new Set(salaries.map(s=>s.id));
+      const newSals = (arch.salaries||[]).filter(s=>!existingSalIds.has(s.id));
+      saveSal([...salaries, ...newSals]);
+
+      // رجّع الخصومات — تفضل عليها settled (مسددة)
+      const existingAttIds = new Set(attendance.map(a=>a.id));
+      const newAtt = (arch.attendance||[]).filter(a=>!existingAttIds.has(a.id));
+      saveAtt([...attendance, ...newAtt]);
+
+      // رجّع السلف — تفضل status "مسدد"
+      const existingAdvIds = new Set(advances.map(a=>a.id));
+      const newAdvs = (arch.advances||[]).filter(a=>!existingAdvIds.has(a.id));
+      saveAdv([...advances, ...newAdvs]);
+
+      // احذف من الأرشيف
+      saveArchive(salaryArchive.filter(a=>a.month!==month));
+      setConfirm(null);
+      showPermissionToast(`✅ تم استرداد أرشيف ${label}`, "success");
     }});
   };
 
@@ -3904,6 +4196,11 @@ function EmployeesPage() {
 
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+      {empMsg.text && (
+        <div style={{ background: empMsg.type==="error" ? C.redDim : C.greenDim, border:`1px solid ${empMsg.type==="error"?C.red:C.green}44`, borderRadius:10, padding:"12px 18px", fontSize:13, fontWeight:600, color: empMsg.type==="error"?C.red:C.green }}>
+          {empMsg.text}
+        </div>
+      )}
       <PageHeader title="إدارة الموظفين" icon={I.clients} subtitle={`${employees.length} موظف`}
         action={
           <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
@@ -3964,6 +4261,17 @@ function EmployeesPage() {
       {/* Salaries Tab */}
       {tab==="salaries" && (
         <Card style={{ padding:0 }}>
+          {lastPaidSal && (
+            <div style={{ padding:"12px 16px", background:C.greenDim, borderBottom:`1px solid ${C.green}33`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+              <span style={{ fontSize:13, fontWeight:700, color:C.green }}>✅ تم صرف مرتب {lastPaidSal.emp?.name} — {lastPaidSal.sal.month}</span>
+              <div style={{ display:"flex", gap:8 }}>
+                <Btn variant="success" small onClick={()=>{ printSalarySlip(lastPaidSal.sal, lastPaidSal.emp, lastPaidSal.attSnapshot, lastPaidSal.advSnapshot); }}>
+                  <Ic d={I.print} s={13} />طباعة القسيمة
+                </Btn>
+                <button onClick={()=>setLastPaidSal(null)} style={{ background:"none", border:"none", cursor:"pointer", color:C.textMuted, fontSize:18, lineHeight:1 }}>×</button>
+              </div>
+            </div>
+          )}
           <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
             <span style={{ fontSize:13,fontWeight:700,color:C.text }}>كشف المرتبات</span>
           </div>
@@ -4002,7 +4310,7 @@ function EmployeesPage() {
       {tab==="attendance" && (
         <Card style={{ padding:0 }}>
           <table style={{ width:"100%",borderCollapse:"collapse" }}>
-            <THead cols={["رقم","التاريخ","الموظف","النوع","قيمة الخصم","السبب",""]} />
+            <THead cols={["رقم","التاريخ","الموظف","النوع","قيمة الخصم","السبب","الحالة"]} />
             <tbody>
               {attendance.map((a,idx)=>(
                 <TRow key={a.id} alt={idx%2}>
@@ -4020,7 +4328,10 @@ function EmployeesPage() {
                   <TD mono color={C.red}>{a.deductAmount>0?fmt(a.deductAmount):"—"}</TD>
                   <TD color={C.textMuted}>{a.reason||"—"}</TD>
                   <td style={{ padding:"11px 14px" }}>
-                    <button onClick={()=>setConfirm({ msg:"حذف هذا السجل؟", onConfirm:()=>saveAtt(attendance.filter(x=>x.id!==a.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                    {a.settled
+                      ? <span style={{ background:C.greenDim,color:C.green,border:`1px solid ${C.green}33`,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>✓ مسددة</span>
+                      : <button onClick={()=>setConfirm({ msg:"حذف هذا السجل؟", onConfirm:()=>saveAtt(attendance.filter(x=>x.id!==a.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                    }
                   </td>
                 </TRow>
               ))}
@@ -4068,12 +4379,14 @@ function EmployeesPage() {
               <span style={{ fontSize:14,fontWeight:700,color:C.text }}>🗂 أرشفة مرتبات شهر</span>
               <select value={archiveMonth} onChange={e=>setArchiveMonth(e.target.value)}
                 style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
-                {allSalaryMonths.map(m=><option key={m} value={m}>{m}</option>)}
-                {allSalaryMonths.length===0&&<option value={today().slice(0,7)}>{today().slice(0,7)}</option>}
+                {allSalaryMonths.map(m=><option key={m} value={m}>{m} {archivedMonths.has(m)?"(مأرشف)":""}</option>)}
+                {[...archivedMonths].filter(m=>!allSalaryMonths.includes(m)).map(m=><option key={m} value={m}>{m} (مأرشف)</option>)}
+                {allSalaryMonths.length===0&&salaryArchive.length===0&&<option value={today().slice(0,7)}>{today().slice(0,7)}</option>}
               </select>
               <Btn variant="yellow" onClick={()=>handleArchiveMonth(archiveMonth)}><Ic d={I.download} s={14} />حفظ في الأرشيف</Btn>
+              <Btn variant="ghost" onClick={()=>{ const [y,m]=archiveMonth.split("-"); const label=new Date(+y,+m-1,1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"}); handleRestoreArchive(archiveMonth,label); }}><Ic d={I.returns} s={14} />استرداد</Btn>
             </div>
-            <p style={{ margin:"10px 0 0",fontSize:12,color:C.textMuted }}>يحفظ جميع مرتبات الشهر المحدد في الأرشيف الدائم — لا تُحذف عند حذف المرتبات العادية.</p>
+            <p style={{ margin:"10px 0 0",fontSize:12,color:C.textMuted }}>اختر الشهر ثم اضغط "حفظ في الأرشيف" للأرشفة، أو "استرداد" لإرجاع مرتبات شهر مؤرشف.</p>
           </Card>
           {salaryArchive.length===0 ? (
             <Card style={{ textAlign:"center",padding:40 }}>
@@ -4134,7 +4447,7 @@ function EmployeesPage() {
               <Inp label="المنصب الوظيفي" value={empForm.position} onChange={v=>setEmpForm({...empForm,position:v})} />
               <Inp label="الراتب الأساسي (ج.م)" type="number" value={empForm.baseSalary} onChange={v=>setEmpForm({...empForm,baseSalary:v})} />
               <Inp label="رقم الهاتف" value={empForm.phone} onChange={v=>setEmpForm({...empForm,phone:v})} />
-              <Inp label="تاريخ التعيين" type="date" value={empForm.startDate} onChange={v=>setEmpForm({...empForm,startDate:v})} />
+              <DatePicker label="تاريخ التعيين" value={empForm.startDate} onChange={v=>setEmpForm({...empForm,startDate:v})} />
             </div>
             <Inp label="ملاحظات" value={empForm.notes} onChange={v=>setEmpForm({...empForm,notes:v})} />
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
@@ -4150,7 +4463,7 @@ function EmployeesPage() {
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
               <Sel label="الموظف" value={salForm.employeeId} onChange={v=>{ const e=employees.find(x=>x.id===v); setSalForm({...salForm,employeeId:v,baseSalary:e?.baseSalary||"",advancesToDeduct:[]}); }} options={employees.map(e=>({value:e.id,label:e.name}))} />
-              <Inp label="الشهر" type="month" value={salForm.month} onChange={v=>setSalForm({...salForm,month:v})} />
+              <MonthPicker label="الشهر" value={salForm.month} onChange={v=>setSalForm({...salForm,month:v})} />
               <Inp label="الراتب الأساسي (ج.م)" type="number" value={salForm.baseSalary} onChange={v=>setSalForm({...salForm,baseSalary:v})} />
               <Inp label="أيام العمل الشهرية" type="number" value={salForm.workingDays} onChange={v=>setSalForm({...salForm,workingDays:v})} placeholder="26" />
               <Inp label="مكافآت وبدلات (ج.م)" type="number" value={salForm.bonus} onChange={v=>setSalForm({...salForm,bonus:v})} placeholder="0" />
@@ -4230,7 +4543,7 @@ function EmployeesPage() {
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
               <Sel label="الموظف" value={attForm.employeeId} onChange={v=>setAttForm({...attForm,employeeId:v})} options={employees.map(e=>({value:e.id,label:e.name}))} />
-              <Inp label="التاريخ" type="date" value={attForm.date} onChange={v=>setAttForm({...attForm,date:v})} />
+              <DatePicker label="التاريخ" value={attForm.date} onChange={v=>setAttForm({...attForm,date:v})} />
               <Sel label="النوع" value={attForm.type} onChange={v=>setAttForm({...attForm,type:v})} options={[{value:"غياب",label:"🔴 غياب"},{value:"إجازة",label:"🟡 إجازة"},{value:"تأخر",label:"🟠 تأخر"},{value:"خصم آخر",label:"⚫ خصم آخر"}]} />
               <Inp label="قيمة الخصم (ج.م)" type="number" value={attForm.deductAmount} onChange={v=>setAttForm({...attForm,deductAmount:v})} placeholder="المبلغ بالجنيه" required />
             </div>
@@ -4251,7 +4564,7 @@ function EmployeesPage() {
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
               <Sel label="الموظف" value={advForm.employeeId} onChange={v=>setAdvForm({...advForm,employeeId:v})} options={employees.map(e=>({value:e.id,label:e.name}))} />
-              <Inp label="التاريخ" type="date" value={advForm.date} onChange={v=>setAdvForm({...advForm,date:v})} />
+              <DatePicker label="التاريخ" value={advForm.date} onChange={v=>setAdvForm({...advForm,date:v})} />
               <Inp label="المبلغ (ج.م)" type="number" value={advForm.amount} onChange={v=>setAdvForm({...advForm,amount:v})} required />
             </div>
             <Inp label="السبب" value={advForm.reason} onChange={v=>setAdvForm({...advForm,reason:v})} placeholder="سبب السلفة..." />
@@ -4363,7 +4676,7 @@ function ExpensesPage({ userId="" }) {
         <Modal title="إضافة مصروف" onClose={()=>setShowModal(false)}>
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-              <Inp label="التاريخ" type="date" value={form.date} onChange={v=>setForm({...form,date:v})} />
+              <DatePicker label="التاريخ" value={form.date} onChange={v=>setForm({...form,date:v})} />
               <Inp label="الوصف" value={form.description} onChange={v=>setForm({...form,description:v})} required />
               <Sel label="الفئة" value={form.category} onChange={v=>setForm({...form,category:v})} options={expenseCategories} />
               <Inp label="المبلغ (ج.م)" type="number" value={form.amount} onChange={v=>setForm({...form,amount:v})} required />
@@ -4476,7 +4789,7 @@ function ProductionCostPage({ data, actions }) {
         <Modal title="إضافة دفعة إنتاج" onClose={()=>setShowModal(false)} wide>
           <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12 }}>
-              <Inp label="التاريخ" type="date" value={form.date} onChange={v=>setForm({...form,date:v})} />
+              <DatePicker label="التاريخ" value={form.date} onChange={v=>setForm({...form,date:v})} />
               <Inp label="اسم المنتج" value={form.productName} onChange={v=>setForm({...form,productName:v})} required />
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
                 <Inp label="الكمية المنتجة" type="number" value={form.quantity} onChange={v=>setForm({...form,quantity:v})} />
@@ -4778,7 +5091,7 @@ function ReceiptsPage({ userId }) {
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
               <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
                 <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>التاريخ</label>
-                <input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} style={inp} />
+                <DatePicker value={form.date} onChange={v=>setForm({...form,date:v})} />
               </div>
               <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
                 <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>المدفوع من *</label>
@@ -4804,7 +5117,7 @@ function ReceiptsPage({ userId }) {
                 </div>
                 <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
                   <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>تاريخ الشيك</label>
-                  <input type="date" value={form.checkDate} onChange={e=>setForm({...form,checkDate:e.target.value})} style={inp} />
+                  <DatePicker value={form.checkDate} onChange={v=>setForm({...form,checkDate:v})} />
                 </div>
               </>}
             </div>
@@ -4825,68 +5138,65 @@ function ReceiptsPage({ userId }) {
 }
 
 // ─── SUBSCRIPTION EXPIRY BELL ────────────────────────────────────────────────
-function SubscriptionExpiryBell({ days }) {
+// ─── UNIFIED NOTIFICATIONS BELL ──────────────────────────────────────────────
+function UnifiedNotificationBell({ days, inventory }) {
   const [open, setOpen] = useState(false);
-  const color = days <= 3 ? C.red : days <= 7 ? C.yellow : C.blue;
-  const dimColor = days <= 3 ? C.redDim : days <= 7 ? C.yellowDim : C.blueDim;
-  const label = days === 0 ? "انتهى الاشتراك!" : days === 1 ? "يوم واحد متبقي" : `${days} يوم متبقي`;
-  return (
-    <div style={{ position:"relative" }}>
-      <button onClick={()=>setOpen(p=>!p)} style={{ background:dimColor,border:`1px solid ${color}33`,borderRadius:10,padding:"8px 12px",cursor:"pointer",color,display:"flex",alignItems:"center",gap:6,fontFamily:"inherit",fontSize:12,fontWeight:700 }}>
-        <Ic d={I.bell} s={15} c={color} />
-        <span style={{ background:color,color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:11,fontWeight:800 }}>{label}</span>
-      </button>
-      {open && (
-        <div style={{ position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:500,background:C.surface,border:`1px solid ${color}33`,borderRadius:16,padding:20,width:320,boxShadow:"0 8px 40px rgba(0,0,0,0.5)" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-            <span style={{ fontWeight:700,color,fontSize:13 }}>⚠ تنبيه الاشتراك</span>
-            <button onClick={()=>setOpen(false)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.close} s={14} /></button>
-          </div>
-          <div style={{ background:dimColor,border:`1px solid ${color}22`,borderRadius:12,padding:"14px 16px" }}>
-            <div style={{ fontWeight:800,color,fontSize:15,marginBottom:6 }}>
-              {days === 0 ? "❌ انتهت صلاحية اشتراكك" : `⏳ متبقي على انتهاء اشتراكك ${label}`}
-            </div>
-            <div style={{ fontSize:12,color:C.textMuted,lineHeight:1.7 }}>
-              يرجى التواصل مع الإدارة لتجديد الاشتراك واستمرار الخدمة بدون انقطاع.
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+  const lowItems = (inventory || []).filter(p => p.qty <= p.minQty);
+  const hasExpiry = days !== null && days <= 10;
+  const hasLowStock = lowItems.length > 0;
+  const totalCount = (hasExpiry ? 1 : 0) + lowItems.length;
+  if (!hasExpiry && !hasLowStock) return null;
 
-// ─── LOW STOCK NOTIFICATIONS ──────────────────────────────────────────────────
-function LowStockNotificationBell({ inventory }) {
-  const [open, setOpen] = useState(false);
-  const lowItems = inventory.filter(p => p.qty <= p.minQty);
-  if (!lowItems.length) return null;
+  const expiryColor = days <= 3 ? C.red : days <= 7 ? C.yellow : C.blue;
+  const expiryDim = days <= 3 ? C.redDim : days <= 7 ? C.yellowDim : C.blueDim;
+  const expiryLabel = days === 0 ? "انتهى الاشتراك!" : days === 1 ? "يوم واحد متبقي" : `${days} يوم متبقي`;
+
+  // لون الزرار: لو في اشتراك منتهي أو مخزون منخفض → أحمر، غير كده → لون الاشتراك
+  const btnColor = (days !== null && days <= 3) || hasLowStock ? C.red : expiryColor;
+  const btnDim = (days !== null && days <= 3) || hasLowStock ? C.redDim : expiryDim;
+
   return (
     <div style={{ position:"relative" }}>
-      <button onClick={()=>setOpen(p=>!p)} style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:"8px 12px",cursor:"pointer",color:C.red,display:"flex",alignItems:"center",gap:6,fontFamily:"inherit",fontSize:12,fontWeight:700 }}>
-        <Ic d={I.bell} s={15} c={C.red} />
-        <span style={{ background:C.red,color:"#fff",borderRadius:"50%",width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,flexShrink:0 }}>{lowItems.length}</span>
-        {!open && "مخزون منخفض"}
+      <button onClick={()=>setOpen(p=>!p)} style={{ background:btnDim,border:`1px solid ${btnColor}33`,borderRadius:10,padding:"8px 12px",cursor:"pointer",color:btnColor,display:"flex",alignItems:"center",gap:6,fontFamily:"inherit",fontSize:12,fontWeight:700 }}>
+        <Ic d={I.bell} s={15} c={btnColor} />
+        <span style={{ background:btnColor,color:"#fff",borderRadius:"50%",width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,flexShrink:0 }}>{totalCount}</span>
+        <span>إشعارات</span>
       </button>
       {open && (
-        <div style={{ position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:500,background:C.surface,border:`1px solid ${C.red}33`,borderRadius:16,padding:16,width:320,boxShadow:`0 8px 40px rgba(0,0,0,0.5)` }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-            <span style={{ fontWeight:700,color:C.red,fontSize:13 }}>⚠ {lowItems.length} أصناف مخزونها منخفض</span>
+        <div style={{ position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:500,background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:16,width:340,boxShadow:"0 8px 40px rgba(0,0,0,0.5)" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <span style={{ fontWeight:700,color:C.text,fontSize:13 }}>🔔 الإشعارات ({totalCount})</span>
             <button onClick={()=>setOpen(false)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.close} s={14} /></button>
           </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:8,maxHeight:260,overflowY:"auto" }}>
-            {lowItems.map(p=>(
-              <div key={p.id} style={{ background:C.redDim,border:`1px solid ${C.red}22`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                <div>
-                  <div style={{ fontWeight:700,color:C.text,fontSize:13 }}>{p.name}</div>
-                  <div style={{ fontSize:11,color:C.textMuted }}>{p.category}</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,maxHeight:320,overflowY:"auto" }}>
+            {/* تنبيه الاشتراك */}
+            {hasExpiry && (
+              <div style={{ background:expiryDim,border:`1px solid ${expiryColor}33`,borderRadius:12,padding:"12px 14px" }}>
+                <div style={{ fontWeight:700,color:expiryColor,fontSize:12,marginBottom:4 }}>⏳ تنبيه الاشتراك</div>
+                <div style={{ fontWeight:800,color:expiryColor,fontSize:14 }}>
+                  {days === 0 ? "❌ انتهت صلاحية اشتراكك" : `متبقي ${expiryLabel}`}
                 </div>
-                <div style={{ textAlign:"left" }}>
-                  <div style={{ fontSize:13,fontWeight:800,color:C.red,fontFamily:"monospace" }}>{p.qty} / {p.minQty}</div>
-                  <div style={{ fontSize:10,color:C.textMuted }}>الموجود / الحد الأدنى</div>
-                </div>
+                <div style={{ fontSize:11,color:C.textMuted,marginTop:4 }}>تواصل مع الإدارة لتجديد الاشتراك</div>
               </div>
-            ))}
+            )}
+            {/* مخزون منخفض */}
+            {hasLowStock && (
+              <>
+                <div style={{ fontSize:11,color:C.textMuted,fontWeight:600,padding:"2px 4px" }}>📦 مخزون منخفض ({lowItems.length} صنف)</div>
+                {lowItems.map(p=>(
+                  <div key={p.id} style={{ background:C.redDim,border:`1px solid ${C.red}22`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontWeight:700,color:C.text,fontSize:13 }}>{p.name}</div>
+                      <div style={{ fontSize:11,color:C.textMuted }}>{p.category}</div>
+                    </div>
+                    <div style={{ textAlign:"left" }}>
+                      <div style={{ fontSize:13,fontWeight:800,color:C.red,fontFamily:"monospace" }}>{p.qty} / {p.minQty}</div>
+                      <div style={{ fontSize:10,color:C.textMuted }}>الموجود / الحد الأدنى</div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -4916,8 +5226,9 @@ export default function App() {
       }
     };
     const handlePageHide = (e) => {
-      if (!e.persisted) {
-        // Page is truly unloading (not bfcache), sign out
+      // لا نعمل signOut لو الـ page مش بتتقفل فعلاً (مثلاً لما بنفتح popup للطباعة)
+      // نتأكد إن الـ document فعلاً بيتحمل برا (visibilityState = hidden ومش persisted)
+      if (!e.persisted && document.visibilityState !== "visible") {
         supabase.auth.signOut();
       }
     };
@@ -4929,15 +5240,23 @@ export default function App() {
     };
   }, []);
 
-  const checkSubscription = async (uid, retries = 3) => {
+  const checkSubscription = async (uid, retries = 2) => {
     if (!uid) return;
     try {
       const { data: profile, error } = await supabase.from("profiles").select("is_active, first_login, subscription_expires_at, allowed_pages, company_name").eq("id", uid).single();
-      if ((error || !profile) && retries > 0) {
-        await new Promise(r => setTimeout(r, 1000));
-        return checkSubscription(uid, retries - 1);
+      if (error) {
+        // لو network error (offline)، نفضل على حالنا ومتعملش retry كتير
+        if (error.message?.includes("Failed to fetch") || error.message?.includes("NetworkError") || error.message?.includes("DISCONNECTED")) {
+          return; // نسيب الـ app يشتغل بدون قطع
+        }
+        if (retries > 0) {
+          await new Promise(r => setTimeout(r, 1500));
+          return checkSubscription(uid, retries - 1);
+        }
+        return;
       }
-      let active = profile ? profile.is_active !== false : true;
+      if (!profile) return;
+      let active = profile.is_active !== false;
       if (active && profile?.subscription_expires_at) {
         const expDate = new Date(profile.subscription_expires_at);
         if (expDate < new Date()) { active = false; setDaysUntilExpiry(0); }
@@ -4955,16 +5274,18 @@ export default function App() {
       // Store uid for logo
       try { sessionStorage.setItem("company_uid", uid); } catch {}
       // Store allowed_pages for company in state (not sessionStorage)
-      if (profile?.allowed_pages && Array.isArray(profile.allowed_pages) && profile.allowed_pages.length > 0) {
+      // اعتبر إن عندنا قيود لو الصفحات محددة وأقل من الكل
+      if (Array.isArray(profile?.allowed_pages) && profile.allowed_pages.length < ALL_PAGES.length) {
         setCompanyAllowedPages(profile.allowed_pages);
         try { sessionStorage.setItem("company_allowed_pages", JSON.stringify(profile.allowed_pages)); } catch {}
         // إذا الصفحة الحالية مش ضمن الصفحات المسموحة، انتقل للأولى المتاحة
         setPage(prev => profile.allowed_pages.includes(prev) ? prev : (profile.allowed_pages[0] || "dash"));
       } else {
+        // null أو كل الصفحات محددة = لا قيود
         setCompanyAllowedPages(null);
         try { sessionStorage.removeItem("company_allowed_pages"); } catch {}
       }
-    } catch { setIsActive(true); }
+    } catch { /* network error - keep app running */ }
   };
 
   useEffect(() => {
@@ -5151,7 +5472,7 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
 
   const renderPage = () => {
     switch (effectivePage) {
-      case "dash": return <Dashboard data={data} />;
+      case "dash": return <Dashboard data={data} daysUntilExpiry={daysUntilExpiry} inventory={data.inventory} />;
       case "sales": return <InvoicesPage title="فواتير المبيعات" invoices={data.salesInvoices} type="sales" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addSale} onDelete={actions.deleteSale} onAddClient={actions.addClient} userEmail={userEmail} />;
       case "purchases": return <InvoicesPage title="فواتير المشتريات" invoices={data.purchaseInvoices} type="purchases" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addPurchase} onDelete={actions.deletePurchase} onAddSupplier={actions.addSupplier} userEmail={userEmail} />;
       case "clients": return <AccountStatement parties={data.clients} invoices={data.salesInvoices} type="client" onAddParty={actions.addClient} onDeleteParty={actions.deleteClient} />;
@@ -5170,7 +5491,7 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
       case "inventoryitems": return <InventoryItemsPage inventory={data.inventory} categories={data.categories} />;
       case "categories": return <CategoriesPage categories={data.categories} onAdd={actions.addCategory} onDelete={actions.deleteCategory} />;
       case "settings": return <CompanySettingsPage userId={userId} userEmail={userEmail} companyName={""} />;
-      default: return <Dashboard data={data} />;
+      default: return <Dashboard data={data} daysUntilExpiry={daysUntilExpiry} inventory={data.inventory} />;
     }
   };
 
@@ -5290,17 +5611,6 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
           *::-webkit-scrollbar-thumb:hover{background:${C.borderLight}}
           *{scrollbar-width:thin;scrollbar-color:${C.border} transparent}
         `}</style>
-        {/* Notification bars — top right */}
-        {(daysUntilExpiry !== null && daysUntilExpiry <= 10 || (data.inventory && data.inventory.some(p=>p.qty<=p.minQty))) && (
-          <div style={{ display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12,flexWrap:"wrap" }}>
-            {daysUntilExpiry !== null && daysUntilExpiry <= 10 && (
-              <SubscriptionExpiryBell days={daysUntilExpiry} />
-            )}
-            {data.inventory && data.inventory.some(p=>p.qty<=p.minQty) && (
-              <LowStockNotificationBell inventory={data.inventory} />
-            )}
-          </div>
-        )}
         {renderPage()}
       </div>
     </div>
@@ -5437,9 +5747,7 @@ function TaxReportsPage({ data }) {
     <tr class="total"><td colspan="4">إجمالي الضرائب المستحقة</td><td style="color:#f59e0b">${report.grandTotalTax.toLocaleString("ar-EG")} ج.م</td></tr>
     </tbody></table>
     <div class="footer">${companyName} — التقرير الضريبي الشهري — طُبع: ${printDateTime}</div></body></html>`;
-    const w = window.open("","_blank");
-    w.document.write(html); w.document.close(); w.focus();
-    setTimeout(()=>w.print(),500);
+    openPrint(html);
   };
 
   return (
