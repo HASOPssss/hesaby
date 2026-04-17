@@ -374,9 +374,10 @@ const openPrint = (html) => {
 // ─── PRINT INVOICE ────────────────────────────────────────────────────────────
 const getCompanyBranding = () => {
   try {
-    // Try to get company info from sessionStorage (set at login)
-    const name = sessionStorage.getItem("company_display_name") || "حسابي Pro";
-    const logo = localStorage.getItem("company_logo_" + (sessionStorage.getItem("company_uid")||"")) || "";
+    // Try sessionStorage first (set at login), fallback to localStorage
+    const uid = sessionStorage.getItem("company_uid") || localStorage.getItem("company_uid_persist") || "";
+    const name = sessionStorage.getItem("company_display_name") || localStorage.getItem("company_name_persist_" + uid) || "حسابي Pro";
+    const logo = localStorage.getItem("company_logo_" + uid) || "";
     return { name, logo };
   } catch { return { name:"حسابي Pro", logo:"" }; }
 };
@@ -2446,7 +2447,7 @@ function Dashboard({ data, daysUntilExpiry, inventory }) {
 }
 
 // ─── INVOICE FORM ─────────────────────────────────────────────────────────────
-function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, onAddClient, onAddSupplier }) {
+function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, onAddClient, onAddSupplier, inventory, onAddInventoryItem, onUpdateInventoryItem }) {
   const isS = type==="sales";
   const [form, setForm] = useState({ date:today(),party:"",paid:"",taxRate:"14",paymentMethod:"نقدي",checkNumber:"",checkDate:"",notes:"" });
   const [items, setItems] = useState([{ category:"",name:"",qty:1,price:0 }]);
@@ -2454,6 +2455,10 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
   const [quickName, setQuickName] = useState("");
   const [quickPhone, setQuickPhone] = useState("");
   const partyList = isS ? clients : suppliers;
+
+  // Autocomplete state per item row
+  const [itemSuggestions, setItemSuggestions] = useState({}); // { rowIndex: [matches] }
+  const [activeItemIdx, setActiveItemIdx] = useState(null);
 
   const subtotal = items.reduce((s,it)=>s+(parseFloat(it.qty)||0)*(parseFloat(it.price)||0),0);
   const taxAmount = isS ? subtotal*(parseFloat(form.taxRate)||0)/100 : 0;
@@ -2463,6 +2468,32 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
   const addItem = ()=>setItems([...items,{ category:"",name:"",qty:1,price:0 }]);
   const removeItem = i=>setItems(items.filter((_,idx)=>idx!==i));
   const updateItem = (i,field,val)=>setItems(items.map((it,idx)=>idx===i?{...it,[field]:val}:it));
+
+  // Handle item name typing — show matching inventory items
+  const handleItemNameChange = (i, val) => {
+    updateItem(i, "name", val);
+    if (!val.trim() || !(inventory||[]).length) {
+      setItemSuggestions(prev=>({...prev,[i]:[]}));
+      return;
+    }
+    const q = val.trim().toLowerCase();
+    const matches = (inventory||[]).filter(inv =>
+      inv.name?.toLowerCase().includes(q) || inv.id?.toLowerCase().includes(q)
+    ).slice(0,6);
+    setItemSuggestions(prev=>({...prev,[i]:matches}));
+  };
+
+  // User picks a suggestion
+  const selectSuggestion = (i, invItem) => {
+    setItems(prev => prev.map((it,idx) => idx===i ? {
+      ...it,
+      name: invItem.name,
+      category: invItem.category || it.category,
+      price: isS ? (invItem.price||0) : (invItem.cost||0),
+    } : it));
+    setItemSuggestions(prev=>({...prev,[i]:[]}));
+    setActiveItemIdx(null);
+  };
 
   const handleQuickAdd = () => {
     if (!quickName.trim()) return;
@@ -2476,20 +2507,69 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
 
   const handleSave = () => {
     if (!form.party||items.every(it=>!it.name)) return;
+    const filledItems = items.filter(it=>it.name);
     onSave({
-      id:(isS?"S":"P")+Date.now().toString().slice(-5),
-      date:form.date,
-      [isS?"client":"supplier"]:form.party,
-      amount:Math.round(total), paid,items,
-      taxRate:parseFloat(form.taxRate)||0,
-      subtotal:Math.round(subtotal),
-      taxAmount:Math.round(taxAmount),
-      paymentMethod:form.paymentMethod,
-      checkNumber:form.checkNumber,
-      checkDate:form.checkDate,
-      notes:form.notes,
-      status:paid>=total?"مدفوعة":paid>0?"جزئية":"غير مدفوعة",
+      id: (isS?"S":"P") + Date.now().toString().slice(-6),
+      type: isS ? "sale" : "purchase",
+      date: form.date,
+      [isS?"client":"supplier"]: form.party,
+      items: filledItems,
+      subtotal, taxRate: isS ? parseFloat(form.taxRate)||0 : 0,
+      taxAmount: isS ? taxAmount : 0,
+      amount: total, paid,
+      status: paid >= total ? "مدفوعة" : paid > 0 ? "جزئية" : "غير مدفوعة",
+      paymentMethod: form.paymentMethod,
+      checkNumber: form.checkNumber,
+      checkDate: form.checkDate,
+      notes: form.notes,
+      createdAt: new Date().toISOString(),
     });
+
+    // ── تحديث المخزون ──
+    if (onAddInventoryItem || onUpdateInventoryItem) {
+      filledItems.forEach(it => {
+        if (!it.name) return;
+        const qty = parseFloat(it.qty)||0;
+        const existingItem = (inventory||[]).find(inv =>
+          inv.name?.trim().toLowerCase() === it.name.trim().toLowerCase()
+        );
+        if (isS) {
+          // مبيعات → نقص الكمية
+          if (existingItem && onUpdateInventoryItem) {
+            onUpdateInventoryItem({ ...existingItem, qty: Math.max(0, (existingItem.qty||0) - qty) });
+          }
+          // لو الصنف مش موجود في المخزون → أضفه بكمية سالب (للتنبيه)
+          else if (!existingItem && onAddInventoryItem) {
+            onAddInventoryItem({
+              id: "INV" + Date.now().toString().slice(-5) + Math.random().toString(36).slice(-3),
+              name: it.name.trim(),
+              category: it.category || "غير محدد",
+              qty: -qty,
+              minQty: 0,
+              cost: 0,
+              price: parseFloat(it.price)||0,
+              unit: "قطعة",
+            });
+          }
+        } else {
+          // مشتريات → زيادة الكمية
+          if (existingItem && onUpdateInventoryItem) {
+            onUpdateInventoryItem({ ...existingItem, qty: (existingItem.qty||0) + qty, cost: parseFloat(it.price)||existingItem.cost });
+          } else if (!existingItem && onAddInventoryItem) {
+            onAddInventoryItem({
+              id: "INV" + Date.now().toString().slice(-5) + Math.random().toString(36).slice(-3),
+              name: it.name.trim(),
+              category: it.category || "غير محدد",
+              qty,
+              minQty: 0,
+              cost: parseFloat(it.price)||0,
+              price: Math.round((parseFloat(it.price)||0) * 1.2),
+              unit: "قطعة",
+            });
+          }
+        }
+      });
+    }
   };
 
   return (
@@ -2552,9 +2632,37 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
                       {categories.map(c=><option key={c} value={c}>{c}</option>)}
                     </select>
                   </td>
-                  <td style={{ padding:"6px 10px" }}>
-                    <input value={it.name} onChange={e=>updateItem(i,"name",e.target.value)} placeholder="اسم الصنف"
+                  <td style={{ padding:"6px 10px", position:"relative" }}>
+                    <input
+                      value={it.name}
+                      onChange={e=>handleItemNameChange(i, e.target.value)}
+                      onFocus={()=>setActiveItemIdx(i)}
+                      onBlur={()=>setTimeout(()=>{ setItemSuggestions(prev=>({...prev,[i]:[]})); setActiveItemIdx(null); }, 180)}
+                      placeholder="ابحث أو اكتب اسم الصنف"
                       style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:"100%" }} />
+                    {(itemSuggestions[i]||[]).length > 0 && (
+                      <div style={{ position:"absolute",top:"100%",right:0,zIndex:500,background:C.surface,border:`1px solid ${C.accent}44`,borderRadius:10,boxShadow:"0 8px 30px rgba(0,0,0,0.4)",minWidth:220,maxHeight:200,overflowY:"auto" }}>
+                        {(itemSuggestions[i]||[]).map(inv=>(
+                          <div key={inv.id} onMouseDown={()=>selectSuggestion(i, inv)}
+                            style={{ padding:"8px 12px",cursor:"pointer",borderBottom:`1px solid ${C.border}20`,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12 }}
+                            onMouseEnter={e=>e.currentTarget.style.background=C.accentDim}
+                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <div>
+                              <div style={{ fontWeight:700,color:C.text }}>{inv.name}</div>
+                              <div style={{ fontSize:10,color:C.textMuted }}>{inv.category} · الكمية: {inv.qty} {inv.unit}</div>
+                            </div>
+                            <div style={{ textAlign:"left" }}>
+                              <div style={{ color:C.green,fontWeight:700 }}>{fmt(isS?inv.price:inv.cost)}</div>
+                              {inv.qty <= inv.minQty && <div style={{ fontSize:10,color:C.red }}>⚠ منخفض</div>}
+                            </div>
+                          </div>
+                        ))}
+                        <div onMouseDown={()=>{ setItemSuggestions(prev=>({...prev,[i]:[]})); }}
+                          style={{ padding:"7px 12px",cursor:"pointer",fontSize:11,color:C.textMuted,textAlign:"center",borderTop:`1px solid ${C.border}` }}>
+                          ➕ استخدام "{it.name}" كصنف جديد
+                        </div>
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding:"6px 10px" }}>
                     <input type="number" value={it.qty} onChange={e=>updateItem(i,"qty",e.target.value)}
@@ -2598,7 +2706,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
 }
 
 // ─── INVOICES PAGE ────────────────────────────────────────────────────────────
-function InvoicesPage({ title, invoices, type, clients, suppliers, categories, onAdd, onDelete, onAddClient, onAddSupplier, userEmail }) {
+function InvoicesPage({ title, invoices, type, clients, suppliers, categories, onAdd, onDelete, onAddClient, onAddSupplier, userEmail, inventory, onAddInventoryItem, onUpdateInventoryItem }) {
   const [showModal, setShowModal] = useState(false);
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
   const [partyForm, setPartyForm] = useState({ name:"", phone:"" });
@@ -2718,7 +2826,10 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
         <Modal title={`فاتورة ${type==="sales"?"مبيعات":"مشتريات"} جديدة`} onClose={()=>setShowModal(false)} wide>
           <InvoiceForm type={type} clients={clients} suppliers={suppliers} categories={categories}
             onSave={inv=>{ onAdd(inv); setShowModal(false); }} onClose={()=>setShowModal(false)}
-            onAddClient={onAddClient} onAddSupplier={onAddSupplier} />
+            onAddClient={onAddClient} onAddSupplier={onAddSupplier}
+            inventory={inventory||[]}
+            onAddInventoryItem={onAddInventoryItem}
+            onUpdateInventoryItem={onUpdateInventoryItem} />
         </Modal>
       )}
     </div>
@@ -3929,21 +4040,24 @@ const printAllSalaries = (salaries, employees, attendance, advances, month) => {
 };
 
 // ─── EMPLOYEES PAGE ───────────────────────────────────────────────────────────
-function EmployeesPage() {
+function EmployeesPage({ userId }) {
+  const uid = userId || "local";
+  const K = (name) => `${name}_${uid}`; // scoped key per company
+
   const [employees, setEmployees] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("employees_local")||"[]"); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(K("employees"))||"[]"); } catch { return []; }
   });
   const [salaries, setSalaries] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("salaries_local")||"[]"); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(K("salaries"))||"[]"); } catch { return []; }
   });
   const [attendance, setAttendance] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("attendance_local")||"[]"); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(K("attendance"))||"[]"); } catch { return []; }
   });
   const [advances, setAdvances] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("advances_local")||"[]"); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(K("advances"))||"[]"); } catch { return []; }
   });
   const [salaryArchive, setSalaryArchive] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("salary_archive_local")||"[]"); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(K("salary_archive"))||"[]"); } catch { return []; }
   });
 
   const [tab, setTab] = useState("employees");
@@ -3963,11 +4077,11 @@ function EmployeesPage() {
   const showEmpMsg = (text, type="success") => { setEmpMsg({text,type}); setTimeout(()=>setEmpMsg({text:"",type:"success"}),3500); };
   const [lastPaidSal, setLastPaidSal] = useState(null); // آخر مرتب اتصرف — لعرض زرار الطباعة
 
-  const saveEmp = (list) => { setEmployees(list); localStorage.setItem("employees_local", JSON.stringify(list)); };
-  const saveSal = (list) => { setSalaries(list); localStorage.setItem("salaries_local", JSON.stringify(list)); };
-  const saveAtt = (list) => { setAttendance(list); localStorage.setItem("attendance_local", JSON.stringify(list)); };
-  const saveAdv = (list) => { setAdvances(list); localStorage.setItem("advances_local", JSON.stringify(list)); };
-  const saveArchive = (list) => { setSalaryArchive(list); localStorage.setItem("salary_archive_local", JSON.stringify(list)); };
+  const saveEmp = (list) => { setEmployees(list); localStorage.setItem(K("employees"), JSON.stringify(list)); };
+  const saveSal = (list) => { setSalaries(list); localStorage.setItem(K("salaries"), JSON.stringify(list)); };
+  const saveAtt = (list) => { setAttendance(list); localStorage.setItem(K("attendance"), JSON.stringify(list)); };
+  const saveAdv = (list) => { setAdvances(list); localStorage.setItem(K("advances"), JSON.stringify(list)); };
+  const saveArchive = (list) => { setSalaryArchive(list); localStorage.setItem(K("salary_archive"), JSON.stringify(list)); };
 
   const openModal = (type) => { setModalType(type); setShowModal(true); };
 
@@ -4743,6 +4857,35 @@ function ProductionCostPage({ data, actions }) {
       notes: form.notes,
     };
     saveProductions([...productions, record]);
+
+    // ── أضف/حدّث المنتج في المخزون ──
+    if (actions) {
+      const qty = parseFloat(form.quantity)||1;
+      const existingItem = (data?.inventory||[]).find(i =>
+        i.name?.trim().toLowerCase() === form.productName.trim().toLowerCase()
+      );
+      if (existingItem) {
+        // حدّث الكمية بالزيادة
+        actions.updateInventoryItem({
+          ...existingItem,
+          qty: (existingItem.qty||0) + qty,
+          cost: Math.round(costPerUnit) || existingItem.cost,
+        });
+      } else {
+        // أضف صنف جديد
+        actions.addInventoryItem({
+          id: "INV" + Date.now().toString().slice(-5),
+          name: form.productName.trim(),
+          category: "إنتاج",
+          qty,
+          minQty: 0,
+          cost: Math.round(costPerUnit),
+          price: Math.round(costPerUnit * 1.2),
+          unit: form.unit || "قطعة",
+        });
+      }
+    }
+
     setShowModal(false);
     setForm({ date:today(), productName:"", quantity:1, unit:"قطعة", notes:"" });
     setMaterials([{ name:"", qty:1, unit:"قطعة", cost:0 }]);
@@ -4908,11 +5051,14 @@ function CompanySettingsPage({ userId, userEmail, companyName: initialCompanyNam
   const [pwLoading, setPwLoading] = useState(false);
   const [pwMsg, setPwMsg] = useState({ text:"", type:"" });
 
-  // Sync branding to sessionStorage for PDF use
+  // Sync branding to sessionStorage AND localStorage for PDF use
   useEffect(() => {
     try {
       sessionStorage.setItem("company_uid", userId||"");
       sessionStorage.setItem("company_display_name", companyName||"حسابي Pro");
+      // Also persist in localStorage so data survives tab close
+      if (userId) localStorage.setItem("company_uid_persist", userId);
+      if (companyName) localStorage.setItem("company_name_persist_" + (userId||""), companyName);
     } catch {}
   }, [userId, companyName]);
 
@@ -5273,10 +5419,16 @@ export default function App() {
       if (profile?.first_login === true) setMustSetPassword(true);
       // Store company_name for sidebar & PDFs
       if (profile?.company_name) {
-        try { sessionStorage.setItem("company_display_name", profile.company_name); } catch {}
+        try {
+          sessionStorage.setItem("company_display_name", profile.company_name);
+          localStorage.setItem("company_name_persist_" + uid, profile.company_name);
+        } catch {}
       }
       // Store uid for logo
-      try { sessionStorage.setItem("company_uid", uid); } catch {}
+      try {
+        sessionStorage.setItem("company_uid", uid);
+        localStorage.setItem("company_uid_persist", uid);
+      } catch {}
       // Store allowed_pages for company in state (not sessionStorage)
       // اعتبر إن عندنا قيود لو الصفحات محددة وأقل من الكل
       if (Array.isArray(profile?.allowed_pages) && profile.allowed_pages.length < ALL_PAGES.length) {
@@ -5477,8 +5629,8 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
   const renderPage = () => {
     switch (effectivePage) {
       case "dash": return <Dashboard data={data} daysUntilExpiry={daysUntilExpiry} inventory={data.inventory} />;
-      case "sales": return <InvoicesPage title="فواتير المبيعات" invoices={data.salesInvoices} type="sales" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addSale} onDelete={actions.deleteSale} onAddClient={actions.addClient} userEmail={userEmail} />;
-      case "purchases": return <InvoicesPage title="فواتير المشتريات" invoices={data.purchaseInvoices} type="purchases" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addPurchase} onDelete={actions.deletePurchase} onAddSupplier={actions.addSupplier} userEmail={userEmail} />;
+      case "sales": return <InvoicesPage title="فواتير المبيعات" invoices={data.salesInvoices} type="sales" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addSale} onDelete={actions.deleteSale} onAddClient={actions.addClient} userEmail={userEmail} inventory={data.inventory} onAddInventoryItem={actions.addInventoryItem} onUpdateInventoryItem={actions.updateInventoryItem} />;
+      case "purchases": return <InvoicesPage title="فواتير المشتريات" invoices={data.purchaseInvoices} type="purchases" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addPurchase} onDelete={actions.deletePurchase} onAddSupplier={actions.addSupplier} userEmail={userEmail} inventory={data.inventory} onAddInventoryItem={actions.addInventoryItem} onUpdateInventoryItem={actions.updateInventoryItem} />;
       case "clients": return <AccountStatement parties={data.clients} invoices={data.salesInvoices} type="client" onAddParty={actions.addClient} onDeleteParty={actions.deleteClient} />;
       case "suppliers": return <AccountStatement parties={data.suppliers} invoices={data.purchaseInvoices} type="supplier" onAddParty={actions.addSupplier} onDeleteParty={actions.deleteSupplier} />;
       case "returns": return <ReturnsPage returns={data.returns} salesInvoices={data.salesInvoices} purchaseInvoices={data.purchaseInvoices} clients={data.clients} suppliers={data.suppliers} onAdd={actions.addReturn} onDelete={actions.deleteReturn} theme={theme} />;
@@ -5488,13 +5640,13 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
       case "taxinvoices": return <TaxInvoicesPage salesInvoices={data.salesInvoices} purchaseInvoices={data.purchaseInvoices} theme={theme} />;
       case "expenses": return <ExpensesPage userId={userId||""} />;
       case "receipts": return <ReceiptsPage userId={userId||""} />;
-      case "production": return <ProductionCostPage data={data} />;
-      case "employees": return <EmployeesPage />;
+      case "production": return <ProductionCostPage data={data} actions={actions} />;
+      case "employees": return <EmployeesPage userId={userId||""} />;
       case "inventory": return <InventoryPage inventory={data.inventory} categories={data.categories} onAdd={actions.addInventoryItem} onEdit={actions.updateInventoryItem} onDelete={actions.deleteInventoryItem} onBulkAdd={actions.bulkAddInventory} userEmail={userEmail} />;
       case "stocktake": return <StocktakePage inventory={data.inventory} categories={data.categories} />;
       case "inventoryitems": return <InventoryItemsPage inventory={data.inventory} categories={data.categories} />;
       case "categories": return <CategoriesPage categories={data.categories} onAdd={actions.addCategory} onDelete={actions.deleteCategory} />;
-      case "settings": return <CompanySettingsPage userId={userId} userEmail={userEmail} companyName={""} />;
+      case "settings": return <CompanySettingsPage userId={userId} userEmail={userEmail} companyName={(() => { try { return localStorage.getItem("company_name_persist_"+(userId||"")) || sessionStorage.getItem("company_display_name") || ""; } catch { return ""; } })()} />;
       default: return <Dashboard data={data} daysUntilExpiry={daysUntilExpiry} inventory={data.inventory} />;
     }
   };
