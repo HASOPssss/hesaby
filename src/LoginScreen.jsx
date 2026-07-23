@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase, C, Ic, I, Logo, Card } from "./shared";
+import { supabase, C, Ic, I, Logo, Card, useTheme } from "./shared";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // LoginScreen.jsx — شاشات الدخول: تسجيل الدخول، تعيين كلمة مرور أول مرة، وشاشة

@@ -1262,7 +1262,7 @@ function PermissionToastProvider() {
 
 // ─── EXPORTS ──────────────────────────────────────────────────────────────────
 export {
-  supabase,
+  supabase, supabaseAdmin,
   normalizeArabic, resolveCategory, EMPTY_STATE, useAppData,
   useTheme, setAppTheme,
   Ic, I,

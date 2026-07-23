@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  supabase, useAppData, C, Ic, I, Logo, fmtDateTime,
+  supabase, supabaseAdmin, useAppData, C, Ic, I, Logo, fmtDateTime,
   ConfirmDialog, Badge, Btn, DatePicker, Inp, Sel, Modal, THead, TRow, TD,
   ADMIN_EMAIL, ALL_PAGES, ROLE_PRESETS, ROLE_TEMPLATES, SUPERVISOR_TEMPLATE, showPermissionToast, logActivity,
 } from "./shared";
