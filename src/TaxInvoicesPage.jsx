@@ -143,7 +143,7 @@ const printTaxInvoice = (inv) => {
     <div class="total-row"><span>المدفوع</span><span>${(inv.paid || 0).toLocaleString("ar-EG")} ج.م</span></div>
     <div class="total-row"><span>المتبقي</span><span>${(inv.amount - inv.paid).toLocaleString("ar-EG")} ج.م</span></div>
   </div>
-  <div class="footer">فاتورة ضريبية رسمية — حسابي Pro — ${new Date().toLocaleDateString("ar-EG")}</div>
+  <div class="footer">فاتورة ضريبية رسمية — hesapy.pro — ${new Date().toLocaleDateString("ar-EG")}</div>
   </body></html>`;
   const w = window.open("", "_blank");
   w.document.write(html); w.document.close(); w.focus();

@@ -148,7 +148,7 @@ const printFinancialReport = (data, selectedMonth) => {
   <table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
   ${filteredSales.map(i => `<tr><td>${i.id}</td><td>${i.date}</td><td>${i.client}</td><td>${i.amount.toLocaleString("ar-EG")} ج.م</td><td>${i.paid.toLocaleString("ar-EG")} ج.م</td><td>${(i.amount - i.paid).toLocaleString("ar-EG")} ج.م</td><td>${i.status}</td></tr>`).join("")}
   </tbody></table>
-  <div class="footer">التقرير المالي — حسابي Pro — ${new Date().toLocaleDateString("ar-EG")}</div></body></html>`;
+  <div class="footer">التقرير المالي — hesapy.pro — ${new Date().toLocaleDateString("ar-EG")}</div></body></html>`;
   const w = window.open("", "_blank");
   w.document.write(html); w.document.close(); w.focus();
   setTimeout(() => w.print(), 500);
