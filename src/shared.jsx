@@ -42,6 +42,7 @@ const EMPTY_STATE = {
   salesInvoices: [], purchaseInvoices: [], clients: [], suppliers: [],
   returns: [], categories: ["إلكترونيات","مواد خام","معدات","مستلزمات مكتبية","آلات","أغذية","ملابس","أدوات"],
   inventory: [],
+  employees: [], salaries: [], attendance: [], advances: [], salaryArchive: [],
 };
 
 // ─── useAppData HOOK ──────────────────────────────────────────────────────────
@@ -80,6 +81,7 @@ function useAppData(userId) {
         salesInvoices: [], purchaseInvoices: [], clients: [], suppliers: [], returns: [],
         categories: ["إلكترونيات","مواد خام","معدات","مستلزمات مكتبية","آلات","أغذية","ملابس","أدوات"],
         inventory: [],
+        employees: [], salaries: [], attendance: [], advances: [], salaryArchive: [],
       };
       rows.forEach(row => {
         const record = row.data;
@@ -103,6 +105,17 @@ function useAppData(userId) {
             if (record.name && !rebuilt.categories.some(c => normalizeArabic(c) === normalizeArabic(record.name)))
               rebuilt.categories.push(record.name);
             break;
+          case "employees": {
+            const idx = rebuilt.employees.findIndex(x => x.id === record.id);
+            if (idx >= 0) rebuilt.employees[idx] = record; else rebuilt.employees.push(record); break;
+          }
+          case "salaries": rebuilt.salaries.push(record); break;
+          case "attendance": rebuilt.attendance.push(record); break;
+          case "advances": {
+            const idx = rebuilt.advances.findIndex(x => x.id === record.id);
+            if (idx >= 0) rebuilt.advances[idx] = record; else rebuilt.advances.push(record); break;
+          }
+          case "salary_archive": rebuilt.salaryArchive.push(record); break;
           default: break;
         }
       });
@@ -255,6 +268,92 @@ function useAppData(userId) {
         });
         return { ...prev, categories: prev.categories.filter(c => normalizeArabic(c) !== normalizeArabic(name)) };
       });
+    },
+
+    // ── الموظفين والمرتبات (مخزّنة في نفس جدول records — مش localStorage) ──
+    addEmployee: async (emp) => {
+      const record = { ...emp, type: "employees" };
+      await saveData("employees", record);
+      setData(prev => ({ ...prev, employees: [...prev.employees, record] }));
+    },
+    updateEmployee: async (emp) => {
+      const record = { ...emp, type: "employees" };
+      await saveData("employees", record);
+      setData(prev => ({ ...prev, employees: prev.employees.map(e => e.id === emp.id ? record : e) }));
+    },
+    deleteEmployee: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, employees: prev.employees.filter(e => e.id !== id) }));
+    },
+    addSalary: async (sal) => {
+      const record = { ...sal, type: "salaries" };
+      await saveData("salaries", record);
+      setData(prev => ({ ...prev, salaries: [...prev.salaries, record] }));
+    },
+    deleteSalary: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, salaries: prev.salaries.filter(s => s.id !== id) }));
+    },
+    addAttendance: async (att) => {
+      const record = { ...att, type: "attendance" };
+      await saveData("attendance", record);
+      setData(prev => ({ ...prev, attendance: [...prev.attendance, record] }));
+    },
+    updateAttendance: async (att) => {
+      const record = { ...att, type: "attendance" };
+      await saveData("attendance", record);
+      setData(prev => ({ ...prev, attendance: prev.attendance.map(a => a.id === att.id ? record : a) }));
+    },
+    deleteAttendance: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, attendance: prev.attendance.filter(a => a.id !== id) }));
+    },
+    addAdvance: async (adv) => {
+      const record = { ...adv, type: "advances" };
+      await saveData("advances", record);
+      setData(prev => ({ ...prev, advances: [...prev.advances, record] }));
+    },
+    updateAdvance: async (adv) => {
+      const record = { ...adv, type: "advances" };
+      await saveData("advances", record);
+      setData(prev => ({ ...prev, advances: prev.advances.map(a => a.id === adv.id ? record : a) }));
+    },
+    deleteAdvance: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, advances: prev.advances.filter(a => a.id !== id) }));
+    },
+    // أرشفة شهر: بتحفظ نسخة كاملة (سناب شوت) وتشيل السجلات النشطة بتاعت الشهر ده
+    archiveSalaryMonth: async (archiveRecord, monthSalaryIds, monthAttendanceIds, monthAdvanceIds) => {
+      const record = { ...archiveRecord, type: "salary_archive" };
+      await saveData("salary_archive", record);
+      for (const id of monthSalaryIds) await deleteRecord(id);
+      for (const id of monthAttendanceIds) await deleteRecord(id);
+      for (const id of monthAdvanceIds) await deleteRecord(id);
+      setData(prev => ({
+        ...prev,
+        salaryArchive: [...prev.salaryArchive, record],
+        salaries: prev.salaries.filter(s => !monthSalaryIds.includes(s.id)),
+        attendance: prev.attendance.filter(a => !monthAttendanceIds.includes(a.id)),
+        advances: prev.advances.filter(a => !monthAdvanceIds.includes(a.id)),
+      }));
+    },
+    deleteSalaryArchive: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, salaryArchive: prev.salaryArchive.filter(a => a.id !== id) }));
+    },
+    // استرداد أرشيف: بترجع السجلات المحفوظة للقوائم النشطة وتمسح سجل الأرشيف
+    restoreSalaryArchive: async (archiveId, salariesToRestore, attendanceToRestore, advancesToRestore) => {
+      for (const s of salariesToRestore) await saveData("salaries", { ...s, type: "salaries" });
+      for (const a of attendanceToRestore) await saveData("attendance", { ...a, type: "attendance" });
+      for (const a of advancesToRestore) await saveData("advances", { ...a, type: "advances" });
+      await deleteRecord(archiveId);
+      setData(prev => ({
+        ...prev,
+        salaries: [...prev.salaries, ...salariesToRestore],
+        attendance: [...prev.attendance, ...attendanceToRestore],
+        advances: [...prev.advances, ...advancesToRestore],
+        salaryArchive: prev.salaryArchive.filter(a => a.id !== archiveId),
+      }));
     },
   };
 
@@ -781,11 +880,34 @@ const logActivity = async (ownerId, { userName, fullName, actionType, section, t
   } catch { /* تجاهل أي خطأ عشان ميوقفش العملية الأساسية */ }
 };
 
-// ─── PASSCODE GATE HOOK (يستخدم في أي صفحة فيها عمليات حساسة) ────────────────
+// ─── سجل المخزون (Inventory Log) ──────────────────────────────────────────────
+// بنسجل أي حركة دخول/خروج من المخزن في جدول inventory_log مستقل عن سجل النشاط
+// العام، عشان يبقى فيه تتبع دقيق لكل حركة صنف بمفرده.
+const logInventoryMovement = async (ownerId, { itemId, itemName, movementType, qty, balanceBefore, balanceAfter, reason, notes, userName, fullName }) => {
+  try {
+    await supabase.from("inventory_log").insert({
+      owner_id: ownerId,
+      item_id: itemId || "",
+      item_name: itemName || "",
+      movement_type: movementType || "in", // "in" | "out"
+      qty: qty || 0,
+      balance_before: balanceBefore ?? null,
+      balance_after: balanceAfter ?? null,
+      reason: reason || "",
+      notes: notes || "",
+      user_name: userName || "",
+      full_name: fullName || userName || "",
+      created_at: new Date().toISOString(),
+    });
+  } catch { /* تجاهل أي خطأ عشان ميوقفش العملية الأساسية */ }
+};
+
+
 // بيتحقق أولاً من صلاحية الصفحة/العملية (تعديل أو حذف) قبل ما يعرض شاشة الـ
 // Passcode. لو الصلاحية مش مفعلة، بيوقف فوراً بتوست تحذيري من غير ما يطلب
 // الباسكود أصلاً. التسجيل في سجل النشاط بقى صريح عبر log() عشان يتسجل بالقيم
 // الفعلية بعد التعديل (مش وقت فتح شاشة التعديل قبل ما المستخدم يغيّر حاجة).
+// ─── PASSCODE GATE HOOK (يستخدم في أي صفحة فيها عمليات حساسة) ────────────────
 function usePasscodeGate(security) {
   const [pending, setPending] = useState(null); // { label, onConfirm }
 
@@ -1192,6 +1314,7 @@ const ALL_PAGES = [
   { id:"production", label:"تكلفة الإنتاج" },
   { id:"employees", label:"الموظفين" },
   { id:"inventory", label:"إدارة المخزون" },
+  { id:"inventorylog", label:"سجل المخزون" },
   { id:"inventoryitems", label:"الأصناف" },
   { id:"categories", label:"الفئات" },
   { id:"settings", label:"إعدادات الشركة" },
@@ -1269,7 +1392,7 @@ export {
   fmt, fmtDateTime, fmtNum, nowISO, today, getMonth,
   openPrint, getCompanyBranding, printInvoice, printTaxInvoice, printStocktakeReport, printStocktakeUpdateReport, printFinancialReport,
   downloadInventoryTemplate, parseInventoryCSV,
-  PasswordDialog, PasscodeDialog, getCachedPasscode, setCachedPasscode, logActivity, usePasscodeGate,
+  PasswordDialog, PasscodeDialog, getCachedPasscode, setCachedPasscode, logActivity, logInventoryMovement, usePasscodeGate,
   ConfirmDialog, Badge, Card, GlowCard, MiniStat, Btn,
   DatePicker, MonthPicker, Inp, Sel, Modal, THead, TRow, TD,
   PageHeader, ProgressBar, SectionTitle, ADMIN_EMAIL, Logo,

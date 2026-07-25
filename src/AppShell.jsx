@@ -6,6 +6,7 @@ import TaxReportsPage from "./TaxReportsPage";
 import ProductionCostPage from "./ProductionCostPage";
 import EmployeesPage from "./EmployeesPage";
 import ActivityLogPage from "./ActivityLogPage";
+import InventoryLogPage from "./InventoryLogPage";
 import ReturnsPage from "./ReturnsPage";
 import RevenuePage from "./RevenuePage";
 import TaxInvoicesPage from "./TaxInvoicesPage";
@@ -44,8 +45,16 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
       case "expenses": return <ExpensesPage userId={userId||""} security={security} pageId="expenses" userEmail={userEmail} />;
       case "receipts": return <ReceiptsPage userId={userId||""} security={security} pageId="receipts" userEmail={userEmail} />;
       case "production": return <ProductionCostPage data={data} actions={actions} />;
-      case "employees": return <EmployeesPage userId={userId||""} security={security} pageId="employees" userEmail={userEmail} />;
+      case "employees": return <EmployeesPage
+        employees={data.employees} salaries={data.salaries} attendance={data.attendance} advances={data.advances} salaryArchive={data.salaryArchive}
+        onAddEmployee={actions.addEmployee} onUpdateEmployee={actions.updateEmployee} onDeleteEmployee={actions.deleteEmployee}
+        onAddSalary={actions.addSalary} onDeleteSalary={actions.deleteSalary}
+        onAddAttendance={actions.addAttendance} onUpdateAttendance={actions.updateAttendance} onDeleteAttendance={actions.deleteAttendance}
+        onAddAdvance={actions.addAdvance} onUpdateAdvance={actions.updateAdvance} onDeleteAdvance={actions.deleteAdvance}
+        onArchiveMonth={actions.archiveSalaryMonth} onDeleteArchive={actions.deleteSalaryArchive} onRestoreArchive={actions.restoreSalaryArchive}
+        security={security} pageId="employees" userEmail={userEmail} />;
       case "inventory": return <InventoryPage inventory={data.inventory} categories={data.categories} onAdd={actions.addInventoryItem} onEdit={actions.updateInventoryItem} onDelete={actions.deleteInventoryItem} onBulkAdd={actions.bulkAddInventory} userEmail={userEmail} userId={userId} security={security} pageId="inventory" />;
+      case "inventorylog": return <InventoryLogPage inventory={data.inventory} onUpdateInventoryItem={actions.updateInventoryItem} security={security} pageId="inventorylog" userId={userId} />;
       case "inventoryitems": return <InventoryItemsPage inventory={data.inventory} categories={data.categories} />;
       case "categories": return <CategoriesPage categories={data.categories} onAdd={actions.addCategory} onDelete={actions.deleteCategory} />;
       case "settings": return <CompanySettingsPage userId={userId} userEmail={userEmail} companyName={(() => { try { return localStorage.getItem("company_name_persist_"+(userId||"")) || sessionStorage.getItem("company_display_name") || ""; } catch { return ""; } })()} isSubUser={security?.isSubUser} />;

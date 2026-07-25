@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase, useAppData, C, I, Logo, ADMIN_EMAIL, ALL_PAGES, SUPERVISOR_TEMPLATE, showPermissionToast, setCachedPasscode, logActivity } from "./shared";
+import { supabase, useAppData, C, I, Logo, ADMIN_EMAIL, ALL_PAGES, SUPERVISOR_TEMPLATE, showPermissionToast, setCachedPasscode } from "./shared";
 import { LoginScreen, SetPasswordScreen, SubscriptionExpired } from "./LoginScreen";
 import AdminPanel from "./AdminPanel";
 import AppShell from "./AppShell";
@@ -143,12 +143,6 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const uid = session?.user?.id ?? null;
       const email = session?.user?.email ?? null;
-      if (_event === "SIGNED_IN" && uid) {
-        logActivity(uid, { userName:email, fullName:email, actionType:"تسجيل دخول", section:"النظام", target:"دخول صاحب الحساب", before:null, after:null });
-      }
-      if (_event === "SIGNED_OUT" && lastAuthRef.current.uid) {
-        logActivity(lastAuthRef.current.uid, { userName:lastAuthRef.current.email, fullName:lastAuthRef.current.email, actionType:"تسجيل خروج", section:"النظام", target:"خروج صاحب الحساب", before:null, after:null });
-      }
       lastAuthRef.current = { uid, email };
       setUserId(uid); setUserEmail(email);
       if (uid) {
@@ -196,16 +190,12 @@ export default function App() {
   const handleSubUserLogin = (su) => {
     setSubUser(su);
     fetchOwnerExtrasForSubUser(su.owner_id);
-    logActivity(su.owner_id, { userName:su.username, fullName:su.display_name||su.username, actionType:"تسجيل دخول", section:"النظام", target:`دخول موظف: ${su.display_name||su.username}`, before:null, after:null });
     // Navigate to first allowed page
     const firstPage = su.allowed_pages?.[0] || "dash";
     setPage(firstPage);
   };
 
   const handleSubUserLogout = () => {
-    if (subUser) {
-      logActivity(subUser.owner_id, { userName:subUser.username, fullName:subUser.display_name||subUser.username, actionType:"تسجيل خروج", section:"النظام", target:`خروج موظف: ${subUser.display_name||subUser.username}`, before:null, after:null });
-    }
     setSubUser(null);
     setPage("dash");
   };
@@ -254,6 +244,12 @@ export default function App() {
       ]},
     ].map(g=>({...g, items: g.items.filter(it=>allowedPages.includes(it.id))})).filter(g=>g.items.length>0);
 
+    // سجل المخزون متاح تلقائياً لأي مستخدم معاه صلاحية "إدارة المخزون"
+    const invGroup = navGroups.find(g => g.items.some(it => it.id === "inventory"));
+    if (invGroup && !invGroup.items.some(it => it.id === "inventorylog")) {
+      invGroup.items.push({ id:"inventorylog", label:"سجل المخزون", icon:I.stocktake });
+    }
+
     // سجل النشاط متاح للمشرف (Supervisor) بس — مش جزء من نظام allowed_pages العادي
     if (subUser.role_template === SUPERVISOR_TEMPLATE) {
       navGroups.push({ label:"الإدارة", items:[{ id:"activitylog", label:"سجل النشاط", icon:I.shield }] });
@@ -275,6 +271,20 @@ export default function App() {
       addInventoryItem: perms.canAdd ? actions.addInventoryItem : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
       updateInventoryItem: perms.canEdit ? actions.updateInventoryItem : ()=>showPermissionToast("ليس لديك صلاحية التعديل"),
       deleteInventoryItem: perms.canDelete ? actions.deleteInventoryItem : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addEmployee: perms.canAdd ? actions.addEmployee : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      updateEmployee: perms.canEdit ? actions.updateEmployee : ()=>showPermissionToast("ليس لديك صلاحية التعديل"),
+      deleteEmployee: perms.canDelete ? actions.deleteEmployee : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addSalary: perms.canAdd ? actions.addSalary : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteSalary: perms.canDelete ? actions.deleteSalary : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addAttendance: perms.canAdd ? actions.addAttendance : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      updateAttendance: perms.canEdit ? actions.updateAttendance : ()=>showPermissionToast("ليس لديك صلاحية التعديل"),
+      deleteAttendance: perms.canDelete ? actions.deleteAttendance : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addAdvance: perms.canAdd ? actions.addAdvance : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      updateAdvance: perms.canEdit ? actions.updateAdvance : ()=>showPermissionToast("ليس لديك صلاحية التعديل"),
+      deleteAdvance: perms.canDelete ? actions.deleteAdvance : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      archiveSalaryMonth: perms.canAdd ? actions.archiveSalaryMonth : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteSalaryArchive: perms.canDelete ? actions.deleteSalaryArchive : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      restoreSalaryArchive: perms.canEdit ? actions.restoreSalaryArchive : ()=>showPermissionToast("ليس لديك صلاحية التعديل"),
     };
 
     // سياق الصلاحيات الحساسة (Passcode): هل مسموح للموظف يحاول العملية دي أصلاً
@@ -290,6 +300,7 @@ export default function App() {
       userLabel: subUser.display_name || subUser.username,
       ownerId: subUser.owner_id,
       canViewAuditLog: subUser.role_template === SUPERVISOR_TEMPLATE,
+      canViewInventoryLog: subUser.role_template === SUPERVISOR_TEMPLATE || (subUser.allowed_pages||[]).includes("inventory"),
     };
 
     return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={restrictedActions} loading={loading}
@@ -330,6 +341,7 @@ export default function App() {
     ]},
     { label:"المخزون", items:[
       { id:"inventory", label:"إدارة المخزون", icon:I.inventory },
+      { id:"inventorylog", label:"سجل المخزون", icon:I.stocktake },
       { id:"inventoryitems", label:"الأصناف", icon:I.box },
       { id:"categories", label:"الفئات", icon:I.categories },
     ]},
@@ -344,7 +356,7 @@ export default function App() {
     : ALL_NAV_GROUPS;
 
   // صاحب الحساب الأساسي: مسموح له بأي عملية حساسة طالما عارف الـ Passcode
-  const ownerSecurity = { isSubUser: false, canDoSensitive: () => true, userLabel: userEmail, ownerId: userId, canViewAuditLog: true };
+  const ownerSecurity = { isSubUser: false, canDoSensitive: () => true, userLabel: userEmail, ownerId: userId, canViewAuditLog: true, canViewInventoryLog: true };
 
   return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={actions} loading={loading}
     userEmail={userEmail} userId={userId} onLogout={()=>supabase.auth.signOut()}

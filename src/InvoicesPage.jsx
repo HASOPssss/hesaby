@@ -19,14 +19,14 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
     checkNumber: editingInvoice.checkNumber || "", checkDate: editingInvoice.checkDate || "", notes: editingInvoice.notes || "",
   } : { date:today(),party:"",paid:"",taxRate:"14",taxEnabled:true,paymentMethod:"نقدي",checkNumber:"",checkDate:"",notes:"" });
   const [items, setItems] = useState(() => editingInvoice?.items?.length ? editingInvoice.items.map(it=>({...it})) : [{ category:"",name:"",qty:1,price:0 }]);
+  const [itemSuggestions, setItemSuggestions] = useState({});
+  const [activeItemIdx, setActiveItemIdx] = useState(null);
+  const [quickAddItemIdx, setQuickAddItemIdx] = useState(null); // index of the row we're adding a new inventory item for
+  const [quickItemForm, setQuickItemForm] = useState({ name:"", category:"", qty:"1", cost:"", price:"", unit:"قطعة", minQty:"0" });
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickName, setQuickName] = useState("");
   const [quickPhone, setQuickPhone] = useState("");
   const partyList = isS ? clients : suppliers;
-
-  // Autocomplete state per item row
-  const [itemSuggestions, setItemSuggestions] = useState({}); // { rowIndex: [matches] }
-  const [activeItemIdx, setActiveItemIdx] = useState(null);
 
   const subtotal = items.reduce((s,it)=>s+(parseFloat(it.qty)||0)*(parseFloat(it.price)||0),0);
   const taxAmount = isS && form.taxEnabled ? subtotal*(parseFloat(form.taxRate)||0)/100 : 0;
@@ -40,15 +40,25 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
   // Handle item name typing — show matching inventory items
   const handleItemNameChange = (i, val) => {
     updateItem(i, "name", val);
-    if (!val.trim() || !(inventory||[]).length) {
-      setItemSuggestions(prev=>({...prev,[i]:[]}));
+    if (!(inventory||[]).length) { setItemSuggestions(prev=>({...prev,[i]:[]})); return; }
+    if (!val.trim()) {
+      // فاضي: اعرض أول 8 أصناف عشان يتصفح من غير ما يكتب حاجة
+      setItemSuggestions(prev=>({...prev,[i]:(inventory||[]).slice(0,8)}));
       return;
     }
     const q = val.trim().toLowerCase();
     const matches = (inventory||[]).filter(inv =>
       inv.name?.toLowerCase().includes(q) || inv.id?.toLowerCase().includes(q)
-    ).slice(0,6);
+    ).slice(0,8);
     setItemSuggestions(prev=>({...prev,[i]:matches}));
+  };
+
+  const handleItemFocus = (i) => {
+    setActiveItemIdx(i);
+    const val = items[i]?.name || "";
+    if (!val.trim() && (inventory||[]).length) {
+      setItemSuggestions(prev=>({...prev,[i]:(inventory||[]).slice(0,8)}));
+    }
   };
 
   // User picks a suggestion
@@ -58,9 +68,39 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
       name: invItem.name,
       category: invItem.category || it.category,
       price: isS ? (invItem.price||0) : (invItem.cost||0),
+      unit: invItem.unit || it.unit,
     } : it));
     setItemSuggestions(prev=>({...prev,[i]:[]}));
     setActiveItemIdx(null);
+  };
+
+  const openQuickAddItem = (i) => {
+    setQuickItemForm({ name: items[i]?.name || "", category: items[i]?.category || categories[0] || "", qty:"1", cost:"", price:"", unit:"قطعة", minQty:"0" });
+    setQuickAddItemIdx(i);
+    setItemSuggestions(prev=>({...prev,[i]:[]}));
+  };
+
+  const saveQuickAddItem = () => {
+    if (!quickItemForm.name.trim() || quickAddItemIdx===null) return;
+    const newItem = {
+      id: "INV"+Date.now().toString().slice(-5),
+      name: quickItemForm.name.trim(),
+      category: quickItemForm.category,
+      qty: parseFloat(quickItemForm.qty)||0,
+      minQty: parseFloat(quickItemForm.minQty)||0,
+      cost: parseFloat(quickItemForm.cost)||0,
+      price: parseFloat(quickItemForm.price)||0,
+      unit: quickItemForm.unit || "قطعة",
+    };
+    if (onAddInventoryItem) onAddInventoryItem(newItem);
+    setItems(prev => prev.map((it,idx) => idx===quickAddItemIdx ? {
+      ...it,
+      name: newItem.name,
+      category: newItem.category,
+      price: isS ? newItem.price : newItem.cost,
+      unit: newItem.unit,
+    } : it));
+    setQuickAddItemIdx(null);
   };
 
   const handleQuickAdd = () => {
@@ -229,12 +269,20 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
                     <input
                       value={it.name}
                       onChange={e=>handleItemNameChange(i, e.target.value)}
-                      onFocus={()=>setActiveItemIdx(i)}
+                      onFocus={()=>handleItemFocus(i)}
                       onBlur={()=>setTimeout(()=>{ setItemSuggestions(prev=>({...prev,[i]:[]})); setActiveItemIdx(null); }, 180)}
-                      placeholder="ابحث أو اكتب اسم الصنف"
+                      placeholder="ابحث أو اختر صنف من القائمة"
                       style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:"100%" }} />
+                    {(() => {
+                      const matched = it.name ? (inventory||[]).find(inv => inv.name === it.name) : null;
+                      return matched ? (
+                        <div style={{ fontSize:10,color:C.textMuted,marginTop:3 }}>
+                          الوحدة: {matched.unit||"—"} · الرصيد الحالي: <span style={{ color: matched.qty<=matched.minQty?C.red:C.text, fontWeight:700 }}>{matched.qty}</span>
+                        </div>
+                      ) : null;
+                    })()}
                     {(itemSuggestions[i]||[]).length > 0 && (
-                      <div style={{ position:"absolute",top:"100%",right:0,zIndex:500,background:C.surface,border:`1px solid ${C.accent}44`,borderRadius:10,boxShadow:"0 8px 30px rgba(0,0,0,0.4)",minWidth:220,maxHeight:200,overflowY:"auto" }}>
+                      <div style={{ position:"absolute",top:"100%",right:0,zIndex:500,background:C.surface,border:`1px solid ${C.accent}44`,borderRadius:10,boxShadow:"0 8px 30px rgba(0,0,0,0.4)",minWidth:250,maxHeight:220,overflowY:"auto" }}>
                         {(itemSuggestions[i]||[]).map(inv=>(
                           <div key={inv.id} onMouseDown={()=>selectSuggestion(i, inv)}
                             style={{ padding:"8px 12px",cursor:"pointer",borderBottom:`1px solid ${C.border}20`,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12 }}
@@ -242,7 +290,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                             <div>
                               <div style={{ fontWeight:700,color:C.text }}>{inv.name}</div>
-                              <div style={{ fontSize:10,color:C.textMuted }}>{inv.category} · الكمية: {inv.qty} {inv.unit}</div>
+                              <div style={{ fontSize:10,color:C.textMuted }}>{inv.category} · {inv.unit||"قطعة"} · الرصيد: {inv.qty}</div>
                             </div>
                             <div style={{ textAlign:"left" }}>
                               <div style={{ color:C.green,fontWeight:700 }}>{fmt(isS?inv.price:inv.cost)}</div>
@@ -250,9 +298,9 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
                             </div>
                           </div>
                         ))}
-                        <div onMouseDown={()=>{ setItemSuggestions(prev=>({...prev,[i]:[]})); }}
-                          style={{ padding:"7px 12px",cursor:"pointer",fontSize:11,color:C.textMuted,textAlign:"center",borderTop:`1px solid ${C.border}` }}>
-                          ➕ استخدام "{it.name}" كصنف جديد
+                        <div onMouseDown={()=>openQuickAddItem(i)}
+                          style={{ padding:"9px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:C.accent,textAlign:"center",borderTop:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
+                          <Ic d={I.plus} s={12} />إضافة صنف جديد
                         </div>
                       </div>
                     )}
@@ -294,6 +342,25 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
         <Btn variant="ghost" onClick={onClose}>إلغاء</Btn>
         <Btn onClick={handleSave}>{editingInvoice ? "حفظ التعديلات" : "حفظ الفاتورة"}</Btn>
       </div>
+      {quickAddItemIdx !== null && (
+        <Modal title="إضافة صنف جديد" onClose={()=>setQuickAddItemIdx(null)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+              <Inp label="اسم الصنف *" value={quickItemForm.name} onChange={v=>setQuickItemForm({...quickItemForm,name:v})} required />
+              <Sel label="الفئة" value={quickItemForm.category} onChange={v=>setQuickItemForm({...quickItemForm,category:v})} options={categories} />
+              <Inp label="الكمية الحالية" type="number" value={quickItemForm.qty} onChange={v=>setQuickItemForm({...quickItemForm,qty:v})} />
+              <Inp label="الحد الأدنى" type="number" value={quickItemForm.minQty} onChange={v=>setQuickItemForm({...quickItemForm,minQty:v})} />
+              <Inp label="سعر التكلفة (الشراء)" type="number" value={quickItemForm.cost} onChange={v=>setQuickItemForm({...quickItemForm,cost:v})} />
+              <Inp label="سعر البيع" type="number" value={quickItemForm.price} onChange={v=>setQuickItemForm({...quickItemForm,price:v})} />
+              <Inp label="وحدة القياس" value={quickItemForm.unit} onChange={v=>setQuickItemForm({...quickItemForm,unit:v})} placeholder="قطعة، كيلو، رزمة..." />
+            </div>
+            <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setQuickAddItemIdx(null)}>إلغاء</Btn>
+              <Btn onClick={saveQuickAddItem}>إضافة واختيار في الفاتورة</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
