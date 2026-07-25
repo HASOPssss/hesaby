@@ -252,8 +252,8 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
           <label style={{ fontSize:13,fontWeight:600,color:C.textDim }}>الأصناف</label>
           <Btn small onClick={addItem}><Ic d={I.plus} s={12} />إضافة صنف</Btn>
         </div>
-        <div style={{ background:C.surface2,borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}` }}>
-          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+        <div style={{ background:C.surface2,borderRadius:12,overflow:"visible",border:`1px solid ${C.border}` }}>
+          <table style={{ width:"100%",borderCollapse:"collapse",borderRadius:12,overflow:"hidden" }}>
             <THead cols={["الفئة","اسم الصنف","الكمية","السعر","الإجمالي",""]} />
             <tbody>
               {items.map((it,i)=>(
@@ -282,7 +282,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
                       ) : null;
                     })()}
                     {(itemSuggestions[i]||[]).length > 0 && (
-                      <div style={{ position:"absolute",top:"100%",right:0,zIndex:500,background:C.surface,border:`1px solid ${C.accent}44`,borderRadius:10,boxShadow:"0 8px 30px rgba(0,0,0,0.4)",minWidth:250,maxHeight:220,overflowY:"auto" }}>
+                      <div style={{ position:"absolute",bottom:"100%",right:0,zIndex:2000,background:C.surface,border:`1px solid ${C.accent}44`,borderRadius:10,boxShadow:"0 -8px 30px rgba(0,0,0,0.5)",minWidth:250,maxHeight:220,overflowY:"auto",marginBottom:4 }}>
                         {(itemSuggestions[i]||[]).map(inv=>(
                           <div key={inv.id} onMouseDown={()=>selectSuggestion(i, inv)}
                             style={{ padding:"8px 12px",cursor:"pointer",borderBottom:`1px solid ${C.border}20`,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12 }}
