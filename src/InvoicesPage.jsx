@@ -335,7 +335,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
         <div style={{
           position:"absolute", top:dropdownPos.top, left:dropdownPos.left, width:Math.max(dropdownPos.width,260),
           zIndex:99999, background:C.surface, border:`1px solid ${C.accent}44`, borderRadius:10,
-          boxShadow:"0 12px 34px rgba(0,0,0,0.5)", display:"flex", flexDirection:"column",
+          boxShadow:"0 12px 34px rgba(0,0,0,0.5)", display:"flex", flexDirection:"column", direction:"rtl",
         }}>
           <div style={{ maxHeight:230, overflowY:"auto" }}>
             {(itemSuggestions[activeItemIdx]||[]).map(inv=>(
