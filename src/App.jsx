@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase, useAppData, C, I, Logo, ADMIN_EMAIL, ALL_PAGES, SUPERVISOR_TEMPLATE, showPermissionToast, setCachedPasscode } from "./shared";
+import { supabase, useAppData, C, I, Logo, ADMIN_EMAIL, ALL_PAGES, SUPERVISOR_TEMPLATE, showPermissionToast, setCachedPasscode, heartbeatSession, releaseSession } from "./shared";
 import { LoginScreen, SetPasswordScreen, SubscriptionExpired } from "./LoginScreen";
 import AdminPanel from "./AdminPanel";
 import AppShell from "./AppShell";
@@ -68,6 +68,33 @@ export default function App() {
       clearInterval(intervalId);
     };
   }, [userId, subUser, idleTimeoutMinutes]);
+
+  // ── نبضة الجلسة الواحدة: تتأكد إن الجهاز ده لسه صاحب الجلسة النشطة، وتبلغ لو حد حاول يدخل من جهاز تاني ──
+  const lastAttemptSeenRef = useRef(null);
+  useEffect(() => {
+    if (!userId && !subUser) return;
+    const table = subUser ? "sub_users" : "profiles";
+    const id = subUser ? subUser.id : userId;
+    let mySessionId = null;
+    try { mySessionId = sessionStorage.getItem("my_session_id"); } catch {}
+    if (!mySessionId) return; // ملهوش جلسة متسجلة (مثلاً كان مسجل قبل ما الميزة دي تتفعّل)
+
+    const intervalId = setInterval(async () => {
+      const result = await heartbeatSession(table, id, mySessionId);
+      if (!result.stillValid) {
+        showPermissionToast("تم تسجيل الدخول لهذا الحساب من جهاز آخر، فتم إنهاء هذه الجلسة.", "error");
+        if (subUser) { setSubUser(null); setPage("dash"); }
+        else { supabase.auth.signOut(); }
+        return;
+      }
+      if (result.loginAttemptAt && result.loginAttemptAt !== lastAttemptSeenRef.current) {
+        lastAttemptSeenRef.current = result.loginAttemptAt;
+        showPermissionToast("تمت محاولة تسجيل الدخول إلى هذا الحساب من جهاز آخر.", "error");
+      }
+    }, 20000);
+
+    return () => clearInterval(intervalId);
+  }, [userId, subUser]);
 
   const checkSubscription = async (uid, retries = 2) => {
     if (!uid) return;
@@ -196,6 +223,11 @@ export default function App() {
   };
 
   const handleSubUserLogout = () => {
+    try {
+      const mySessionId = sessionStorage.getItem("my_session_id");
+      if (subUser && mySessionId) releaseSession("sub_users", subUser.id, mySessionId);
+      sessionStorage.removeItem("my_session_id");
+    } catch {}
     setSubUser(null);
     setPage("dash");
   };
@@ -359,7 +391,14 @@ export default function App() {
   const ownerSecurity = { isSubUser: false, canDoSensitive: () => true, userLabel: userEmail, ownerId: userId, canViewAuditLog: true, canViewInventoryLog: true };
 
   return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={actions} loading={loading}
-    userEmail={userEmail} userId={userId} onLogout={()=>supabase.auth.signOut()}
+    userEmail={userEmail} userId={userId} onLogout={()=>{
+      try {
+        const mySessionId = sessionStorage.getItem("my_session_id");
+        if (userId && mySessionId) releaseSession("profiles", userId, mySessionId);
+        sessionStorage.removeItem("my_session_id");
+      } catch {}
+      supabase.auth.signOut();
+    }}
     sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}
     daysUntilExpiry={daysUntilExpiry}
     security={ownerSecurity}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase, C, Ic, I, Logo, Card, useTheme } from "./shared";
+import { supabase, C, Ic, I, Logo, Card, useTheme, claimSession } from "./shared";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // LoginScreen.jsx — شاشات الدخول: تسجيل الدخول، تعيين كلمة مرور أول مرة، وشاشة
@@ -127,8 +127,21 @@ function LoginScreen({ onSubUserLogin }) {
       // Save last email
       try { localStorage.setItem("last_login_email", form.email); } catch {}
       // First attempt: normal login with entered password
-      const { error } = await supabase.auth.signInWithPassword({ email:form.email.toLowerCase().trim(), password:form.password });
-      if (!error) { setLoading(false); return; }
+      const { data, error } = await supabase.auth.signInWithPassword({ email:form.email.toLowerCase().trim(), password:form.password });
+      if (!error) {
+        const uid = data?.user?.id;
+        if (uid) {
+          const claim = await claimSession("profiles", uid);
+          if (!claim.allowed) {
+            await supabase.auth.signOut();
+            setErr("هذا الحساب قيد الاستخدام على جهاز آخر.");
+            setLoading(false);
+            return;
+          }
+          try { sessionStorage.setItem("my_session_id", claim.sessionId); } catch {}
+        }
+        setLoading(false); return;
+      }
 
       // If failed, check if this is a first-login account (use temp_password)
       if (error.message.includes("Invalid login credentials")) {
@@ -136,8 +149,21 @@ function LoginScreen({ onSubUserLogin }) {
           .from("profiles").select("first_login, temp_password").eq("email", form.email.toLowerCase().trim()).single();
         if (profileData?.first_login && profileData?.temp_password) {
           // Try with temp password (admin-set password)
-          const { error: err2 } = await supabase.auth.signInWithPassword({ email:form.email.toLowerCase().trim(), password:profileData.temp_password });
-          if (!err2) { setLoading(false); return; } // success — App will detect first_login and show SetPasswordScreen
+          const { data: data2, error: err2 } = await supabase.auth.signInWithPassword({ email:form.email.toLowerCase().trim(), password:profileData.temp_password });
+          if (!err2) {
+            const uid2 = data2?.user?.id;
+            if (uid2) {
+              const claim2 = await claimSession("profiles", uid2);
+              if (!claim2.allowed) {
+                await supabase.auth.signOut();
+                setErr("هذا الحساب قيد الاستخدام على جهاز آخر.");
+                setLoading(false);
+                return;
+              }
+              try { sessionStorage.setItem("my_session_id", claim2.sessionId); } catch {}
+            }
+            setLoading(false); return;
+          } // success — App will detect first_login and show SetPasswordScreen
         }
         setErr("البريد الإلكتروني أو كلمة المرور غير صحيحة");
       } else if (error.message.includes("Email not confirmed")) {
@@ -160,6 +186,9 @@ function LoginScreen({ onSubUserLogin }) {
       const su = subUsers[0];
       if (su.password_plain !== empForm.password) { setErr("كلمة المرور غير صحيحة"); setLoading(false); return; }
       if (!su.is_active) { setErr("هذا الحساب معطّل، تواصل مع المسؤول"); setLoading(false); return; }
+      const claim = await claimSession("sub_users", su.id, (() => { try { return sessionStorage.getItem("my_session_id"); } catch { return null; } })());
+      if (!claim.allowed) { setErr("هذا الحساب قيد الاستخدام على جهاز آخر."); setLoading(false); return; }
+      try { sessionStorage.setItem("my_session_id", claim.sessionId); } catch {}
       onSubUserLogin(su);
     } catch(e){ setErr(e.message); }
     setLoading(false);

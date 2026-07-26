@@ -818,13 +818,65 @@ function PasswordDialog({ userEmail, onConfirm, onCancel, title = "تأكيد ب
   );
 }
 
-// ─── PASSCODE (رمز حماية مستقل عن كلمة مرور تسجيل الدخول) ────────────────────
+// ─── جلسة واحدة بس لكل حساب (منع تسجيل الدخول من أكتر من جهاز) ───────────────
+// أي حساب (شركة أو موظف) يقدر يكون عنده جلسة واحدة نشطة بس. بنتابعها عن طريق
+// عمودين في جدول الحساب: active_session_id (معرّف الجلسة الحالية) و
+// active_session_at (آخر "نبضة" منها). لو جهاز جديد حاول يدخل والجلسة القديمة
+// لسه نشطة (نبضت خلال آخر 45 ثانية)، بيترفض الدخول الجديد فورًا.
+const SESSION_STALE_MS = 45000;
+
+const generateSessionId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+// يحاول الجهاز يستحوذ على الجلسة. بيرجع { allowed, sessionId }
+// existingSessionId (اختياري): لو الجهاز ده أصلاً صاحب الجلسة الحالية (مثلاً
+// الموظف عمل تحديث للصفحة)، منمنعوش من الدخول تاني بنفس جلسته.
+const claimSession = async (table, id, existingSessionId) => {
+  try {
+    const { data } = await supabase.from(table).select("active_session_id, active_session_at").eq("id", id).single();
+    const lastBeat = data?.active_session_at ? new Date(data.active_session_at).getTime() : 0;
+    const isStale = !data?.active_session_id || (Date.now() - lastBeat > SESSION_STALE_MS);
+    const isSameSession = existingSessionId && data?.active_session_id === existingSessionId;
+    if (!isStale && !isSameSession) {
+      // في جهاز تاني شغال دلوقتي بالحساب ده — نرفض ونبلغه إن حد حاول يدخل
+      await supabase.from(table).update({ login_attempt_at: new Date().toISOString() }).eq("id", id);
+      return { allowed: false, sessionId: null };
+    }
+    const sessionId = isSameSession ? existingSessionId : generateSessionId();
+    await supabase.from(table).update({ active_session_id: sessionId, active_session_at: new Date().toISOString() }).eq("id", id);
+    return { allowed: true, sessionId };
+  } catch {
+    // لو الأعمدة مش موجودة لسه أو حصل أي خطأ، منمنعش المستخدم من الدخول
+    return { allowed: true, sessionId: existingSessionId || generateSessionId() };
+  }
+};
+
+// نبضة دورية: بتأكد إن الجلسة لسه بتاعتنا، وترجع لو حد حاول يدخل من جهاز تاني
+const heartbeatSession = async (table, id, sessionId) => {
+  try {
+    const { data } = await supabase.from(table).select("active_session_id, login_attempt_at").eq("id", id).single();
+    if (data?.active_session_id && data.active_session_id !== sessionId) {
+      return { stillValid: false, loginAttemptAt: null };
+    }
+    await supabase.from(table).update({ active_session_at: new Date().toISOString() }).eq("id", id);
+    return { stillValid: true, loginAttemptAt: data?.login_attempt_at || null };
+  } catch {
+    return { stillValid: true, loginAttemptAt: null };
+  }
+};
+
+// تحرير الجلسة عند تسجيل الخروج — بس لو لسه هي جلستنا (حماية من تعارض التوقيت)
+const releaseSession = (table, id, sessionId) => {
+  try { supabase.from(table).update({ active_session_id: null, active_session_at: null }).eq("id", id).eq("active_session_id", sessionId).then(()=>{}); } catch {}
+};
+
+
 // الباسكود بتاع الشركة بيتخزن في sessionStorage بعد جلبه من الداتابيز عند الدخول
 // (مش عن طريق تسجيل دخول Supabase — عشان يشتغل مع المستخدمين الفرعيين برضو
 // اللي مفيهمش حساب Supabase حقيقي أصلاً).
 const getCachedPasscode = () => { try { return sessionStorage.getItem("security_passcode_cache") || ""; } catch { return ""; } };
 const setCachedPasscode = (val) => { try { if (val) sessionStorage.setItem("security_passcode_cache", val); else sessionStorage.removeItem("security_passcode_cache"); } catch {} };
 
+// ─── PASSCODE (رمز حماية مستقل عن كلمة مرور تسجيل الدخول) ────────────────────
 function PasscodeDialog({ onConfirm, onCancel, title = "أدخل رمز الحماية (Passcode)" }) {
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
@@ -1386,6 +1438,7 @@ function PermissionToastProvider() {
 // ─── EXPORTS ──────────────────────────────────────────────────────────────────
 export {
   supabase, supabaseAdmin,
+  claimSession, heartbeatSession, releaseSession,
   normalizeArabic, resolveCategory, EMPTY_STATE, useAppData,
   useTheme, setAppTheme,
   Ic, I,

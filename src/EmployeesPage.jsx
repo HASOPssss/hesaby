@@ -7,7 +7,9 @@ import {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // EmployeesPage.jsx — الموظفين: البيانات، الحضور والانصراف، السلف، المرتبات،
-// وأرشيف المرتبات. تعتمد على localStorage للتخزين (userId-scoped keys).
+// وأرشيف المرتبات. البيانات كلها متخزنة فعلياً في قاعدة البيانات (جدول records)
+// عن طريق الـ actions اللي بتوصل من App/AppShell — مش localStorage، عشان تتشارك
+// بين صاحب الحساب وكل الموظفين المصرح لهم بدل ما تختلف من جهاز لجهاز.
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ─── PRINT SALARY SLIP ───────────────────────────────────────────────────────
@@ -139,26 +141,16 @@ const printAllSalaries = (salaries, employees, attendance, advances, month) => {
 };
 
 // ─── EMPLOYEES PAGE ───────────────────────────────────────────────────────────
-function EmployeesPage({ userId, security, pageId, userEmail }) {
-  const uid = userId || "local";
-  const K = (name) => `${name}_${uid}`; // scoped key per company
+function EmployeesPage({
+  employees, salaries, attendance, advances, salaryArchive,
+  onAddEmployee, onUpdateEmployee, onDeleteEmployee,
+  onAddSalary, onDeleteSalary,
+  onAddAttendance, onUpdateAttendance, onDeleteAttendance,
+  onAddAdvance, onUpdateAdvance, onDeleteAdvance,
+  onArchiveMonth, onDeleteArchive, onRestoreArchive,
+  security, pageId, userEmail,
+}) {
   const { requestPasscode, PasscodeGate, log } = usePasscodeGate(security);
-
-  const [employees, setEmployees] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(K("employees"))||"[]"); } catch { return []; }
-  });
-  const [salaries, setSalaries] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(K("salaries"))||"[]"); } catch { return []; }
-  });
-  const [attendance, setAttendance] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(K("attendance"))||"[]"); } catch { return []; }
-  });
-  const [advances, setAdvances] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(K("advances"))||"[]"); } catch { return []; }
-  });
-  const [salaryArchive, setSalaryArchive] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(K("salary_archive"))||"[]"); } catch { return []; }
-  });
 
   const [tab, setTab] = useState("employees");
   const [showModal, setShowModal] = useState(false);
@@ -177,23 +169,19 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
   const showEmpMsg = (text, type="success") => { setEmpMsg({text,type}); setTimeout(()=>setEmpMsg({text:"",type:"success"}),3500); };
   const [lastPaidSal, setLastPaidSal] = useState(null); // آخر مرتب اتصرف — لعرض زرار الطباعة
 
-  const saveEmp = (list) => { setEmployees(list); localStorage.setItem(K("employees"), JSON.stringify(list)); };
-  const saveSal = (list) => { setSalaries(list); localStorage.setItem(K("salaries"), JSON.stringify(list)); };
-  const saveAtt = (list) => { setAttendance(list); localStorage.setItem(K("attendance"), JSON.stringify(list)); };
-  const saveAdv = (list) => { setAdvances(list); localStorage.setItem(K("advances"), JSON.stringify(list)); };
-  const saveArchive = (list) => { setSalaryArchive(list); localStorage.setItem(K("salary_archive"), JSON.stringify(list)); };
-
   const openModal = (type) => { setModalType(type); setShowModal(true); };
 
   const handleSaveEmployee = () => {
     if (!empForm.name.trim()) return;
     if (editingEmp) {
       const updatedRec = { ...editingEmp, ...empForm, baseSalary:parseFloat(empForm.baseSalary)||0 };
-      saveEmp(employees.map(e => e.id === editingEmp.id ? updatedRec : e));
+      onUpdateEmployee(updatedRec);
       log({ actionType:"تعديل", section:"الموظفين", target:empForm.name, before:editingEmp, after:updatedRec });
       setEditingEmp(null);
     } else {
-      saveEmp([...employees, { id:"EMP"+Date.now().toString().slice(-5), ...empForm, baseSalary:parseFloat(empForm.baseSalary)||0, createdAt: new Date().toISOString() }]);
+      const newEmp = { id:"EMP"+Date.now().toString().slice(-5), ...empForm, baseSalary:parseFloat(empForm.baseSalary)||0, createdAt: new Date().toISOString() };
+      onAddEmployee(newEmp);
+      log({ actionType:"إضافة", section:"الموظفين", target:empForm.name, before:null, after:newEmp });
     }
     setShowModal(false);
     setEmpForm({ name:"", position:"", baseSalary:"", phone:"", startDate:today(), notes:"" });
@@ -216,7 +204,7 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
   const handleDeleteEmployee = (e) => {
     requestPasscode({
       pageId, kind:"delete", label:"حذف موظف",
-      onConfirm: () => { saveEmp(employees.filter(x=>x.id!==e.id)); log({ actionType:"حذف", section:"الموظفين", target:e.name, before:e, after:null }); },
+      onConfirm: () => { onDeleteEmployee(e.id); log({ actionType:"حذف", section:"الموظفين", target:e.name, before:e, after:null }); },
     });
   };
 
@@ -274,24 +262,16 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
       dailyRate, deductAbsence, deductLeave, deductLate, deductOther, deductAdvances, totalDeductions,
       absCount, leaveCount, lateCount, paidAt
     };
-    const updatedSalaries = [...salaries, newSal];
-    saveSal(updatedSalaries);
+    onAddSalary(newSal);
+    log({ actionType:"سداد مرتب", section:"المرتبات", target:`${emp?.name||""} — ${newSal.month}`, before:null, after:{ netSalary:newSal.netSalary, month:newSal.month } });
 
     // ① علّم خصومات هذا الموظف في هذا الشهر كـ "مسددة" بدل حذفها
-    const updatedAtt = attendance.map(a =>
-      (a.employeeId===salForm.employeeId && a.date?.startsWith(salForm.month))
-        ? { ...a, settled: true, settledInSalary: salId }
-        : a
-    );
-    saveAtt(updatedAtt);
+    const attToSettle = attendance.filter(a => a.employeeId===salForm.employeeId && a.date?.startsWith(salForm.month));
+    attToSettle.forEach(a => onUpdateAttendance({ ...a, settled: true, settledInSalary: salId }));
 
     // ② علّم السلف المخصومة كـ "مسددة" بدل حذفها
     if (selectedAdvIds.length > 0) {
-      saveAdv(advances.map(a =>
-        selectedAdvIds.includes(a.id)
-          ? { ...a, status: "مسدد", settledInSalary: salId }
-          : a
-      ));
+      advances.filter(a => selectedAdvIds.includes(a.id)).forEach(a => onUpdateAdvance({ ...a, status: "مسدد", settledInSalary: salId }));
     }
 
     setShowModal(false);
@@ -305,7 +285,9 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
   const handleSaveAttendance = () => {
     if (!attForm.employeeId) return;
     const emp = employees.find(e=>e.id===attForm.employeeId);
-    saveAtt([...attendance, { id:"ATT"+Date.now().toString().slice(-5), ...attForm, employeeName:emp?.name||"", deductAmount:parseFloat(attForm.deductAmount)||0 }]);
+    const newAtt = { id:"ATT"+Date.now().toString().slice(-5), ...attForm, employeeName:emp?.name||"", deductAmount:parseFloat(attForm.deductAmount)||0 };
+    onAddAttendance(newAtt);
+    log({ actionType:"إضافة خصم", section:"الموظفين", target:`${emp?.name||""} — ${attForm.type}`, before:null, after:newAtt });
     setShowModal(false);
     setAttForm({ employeeId:"", date:today(), type:"غياب", reason:"", deductAmount:"" });
   };
@@ -313,7 +295,9 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
   const handleSaveAdvance = () => {
     if (!advForm.employeeId||!advForm.amount) return;
     const emp = employees.find(e=>e.id===advForm.employeeId);
-    saveAdv([...advances, { id:"ADV"+Date.now().toString().slice(-5), ...advForm, amount:parseFloat(advForm.amount)||0, employeeName:emp?.name||"" }]);
+    const newAdv = { id:"ADV"+Date.now().toString().slice(-5), ...advForm, amount:parseFloat(advForm.amount)||0, employeeName:emp?.name||"" };
+    onAddAdvance(newAdv);
+    log({ actionType:"إضافة سلفة", section:"الموظفين", target:`${emp?.name||""} — ${fmt(newAdv.amount)}`, before:null, after:newAdv });
     setShowModal(false);
     setAdvForm({ employeeId:"", date:today(), amount:"", reason:"", status:"قيد السداد" });
   };
@@ -341,7 +325,7 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
     const monthAdvs = advances.filter(a=>empIds.has(a.employeeId) && (a.settledInSalary && salIds.has(a.settledInSalary)));
 
     const archiveEntry = {
-      month, archivedAt: new Date().toISOString(),
+      id: "ARCH_" + month, month, archivedAt: new Date().toISOString(),
       salaries: monthSals,
       attendance: monthAtt,
       advances: monthAdvs,
@@ -349,15 +333,14 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
       totalDeductions: monthSals.reduce((s,x)=>s+(x.totalDeductions||0),0),
       empCount: monthSals.length,
     };
-    const updatedArchive = salaryArchive.filter(a=>a.month!==month);
-    saveArchive([...updatedArchive, archiveEntry]);
 
-    // احذف المرتبات والخصومات والسلف من القوائم الأصلية
-    saveSal(salaries.filter(s=>s.month!==month));
-    saveAtt(attendance.filter(a=>!(a.date?.startsWith(month) && empIds.has(a.employeeId))));
-    const attIds = new Set(monthAtt.map(a=>a.id));
-    const advIds = new Set(monthAdvs.map(a=>a.id));
-    saveAdv(advances.filter(a=>!advIds.has(a.id)));
+    onArchiveMonth(
+      archiveEntry,
+      monthSals.map(s=>s.id),
+      monthAtt.map(a=>a.id),
+      monthAdvs.map(a=>a.id),
+    );
+    log({ actionType:"أرشفة مرتبات", section:"المرتبات", target:`أرشيف ${month}`, before:null, after:{ month, empCount: monthSals.length, totalNet: archiveEntry.totalNet } });
 
     showPermissionToast(`✅ تم أرشفة مرتبات ${month} (${monthSals.length} موظف)`, "success");
   };
@@ -367,7 +350,7 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
     requestPasscode({
       pageId, kind:"delete", label:"حذف أرشيف مرتبات",
       onConfirm: () => {
-        saveArchive(salaryArchive.filter(a=>a.month!==month));
+        if (arch) onDeleteArchive(arch.id);
         log({ actionType:"حذف", section:"المرتبات", target:`أرشيف ${label}`, before: arch||null, after:null });
       },
     });
@@ -381,24 +364,21 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
       // رجّع المرتبات (تجنب تكرار)
       const existingSalIds = new Set(salaries.map(s=>s.id));
       const newSals = (arch.salaries||[]).filter(s=>!existingSalIds.has(s.id));
-      saveSal([...salaries, ...newSals]);
 
       // رجّع الخصومات — كلها مسددة لأنها دخلت الأرشيف
       const existingAttIds = new Set(attendance.map(a=>a.id));
       const newAtt = (arch.attendance||[])
         .filter(a=>!existingAttIds.has(a.id))
         .map(a=>({ ...a, settled: true }));
-      saveAtt([...attendance, ...newAtt]);
 
       // رجّع السلف — كلها مسدد لأنها دخلت الأرشيف
       const existingAdvIds = new Set(advances.map(a=>a.id));
       const newAdvs = (arch.advances||[])
         .filter(a=>!existingAdvIds.has(a.id))
         .map(a=>({ ...a, status: "مسدد" }));
-      saveAdv([...advances, ...newAdvs]);
 
-      // احذف من الأرشيف
-      saveArchive(salaryArchive.filter(a=>a.month!==month));
+      onRestoreArchive(arch.id, newSals, newAtt, newAdvs);
+      log({ actionType:"استرداد أرشيف", section:"المرتبات", target:`أرشيف ${label}`, before:null, after:{ month } });
       setConfirm(null);
       showPermissionToast(`✅ تم استرداد أرشيف ${label}`, "success");
     }});
@@ -566,7 +546,7 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
                   <td style={{ padding:"11px 14px" }}>
                     {a.settled
                       ? <span style={{ background:C.greenDim,color:C.green,border:`1px solid ${C.green}33`,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700 }}>✓ مسددة</span>
-                      : <button onClick={()=>setConfirm({ msg:"حذف هذا السجل؟", onConfirm:()=>saveAtt(attendance.filter(x=>x.id!==a.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                      : <button onClick={()=>requestPasscode({ pageId, kind:"delete", label:"حذف سجل خصم/غياب", onConfirm:()=>{ onDeleteAttendance(a.id); log({ actionType:"حذف", section:"الموظفين", target:`سجل ${a.type} — ${a.employeeName}`, before:a, after:null }); } })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
                     }
                   </td>
                 </TRow>
@@ -595,8 +575,8 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
                   </td>
                   <td style={{ padding:"11px 14px" }}>
                     <div style={{ display:"flex",gap:6 }}>
-                      {a.status!=="مسدد" && <button onClick={()=>saveAdv(advances.map(x=>x.id===a.id?{...x,status:"مسدد"}:x))} style={{ background:C.greenDim,border:`1px solid ${C.green}33`,borderRadius:6,padding:"3px 10px",fontSize:11,color:C.green,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>مسدد</button>}
-                      <button onClick={()=>setConfirm({ msg:"حذف هذه السلفة؟", onConfirm:()=>saveAdv(advances.filter(x=>x.id!==a.id)) })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                      {a.status!=="مسدد" && <button onClick={()=>requestPasscode({ pageId, kind:"edit", label:"تعديل سلفة (تسديد)", onConfirm:()=>{ onUpdateAdvance({...a,status:"مسدد"}); log({ actionType:"تعديل سلفة", section:"الموظفين", target:`${a.employeeName} — ${fmt(a.amount)}`, before:{status:a.status}, after:{status:"مسدد"} }); } })} style={{ background:C.greenDim,border:`1px solid ${C.green}33`,borderRadius:6,padding:"3px 10px",fontSize:11,color:C.green,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>مسدد</button>}
+                      <button onClick={()=>requestPasscode({ pageId, kind:"delete", label:"حذف سلفة", onConfirm:()=>{ onDeleteAdvance(a.id); log({ actionType:"حذف", section:"الموظفين", target:`سلفة ${a.employeeName} — ${fmt(a.amount)}`, before:a, after:null }); } })} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
                     </div>
                   </td>
                 </TRow>
@@ -768,7 +748,7 @@ function EmployeesPage({ userId, security, pageId, userEmail }) {
             <Inp label="ملاحظات" value={salForm.notes} onChange={v=>setSalForm({...salForm,notes:v})} />
             <div style={{ display:"flex",gap:10,justifyContent:"flex-end" }}>
               <Btn variant="ghost" onClick={()=>setShowModal(false)}>إلغاء</Btn>
-              <Btn variant="success" onClick={handleSaveSalary}>✅ صرف المرتب</Btn>
+              <Btn variant="success" onClick={()=>requestPasscode({ pageId, kind:"edit", label:"صرف مرتب", onConfirm:handleSaveSalary })}>✅ صرف المرتب</Btn>
             </div>
           </div>
         </Modal>
