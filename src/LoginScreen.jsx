@@ -221,8 +221,8 @@ function LoginScreen({ onSubUserLogin }) {
 
         {/* Logo & title */}
         <div style={{ textAlign:"center", marginBottom:30 }}>
-          <div style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:68, height:68, borderRadius:20, background:`linear-gradient(135deg, ${C.accent}, #818cf8)`, boxShadow:`0 8px 30px ${C.accent}40`, marginBottom:16 }}>
-            <Logo size={38} />
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"center", marginBottom:16 }}>
+            <Logo size={100} />
           </div>
           <div style={{ fontSize:26, fontWeight:800, color:C.text, letterSpacing:-0.5, marginBottom:6 }}>حسابي Pro</div>
           <div style={{ fontSize:12, color:C.textMuted, lineHeight:1.7 }}>نظام محاسبة متكامل للشركات والمصانع</div>
