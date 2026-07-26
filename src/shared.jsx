@@ -1339,14 +1339,7 @@ const ADMIN_EMAIL = "gabr80252@gmail.com";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 const Logo = ({ size=32 }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-    <rect width="32" height="32" rx="9" fill="#6c7fff"/>
-    <rect x="2" y="2" width="28" height="28" rx="7" fill="url(#lg)"/>
-    <defs><linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stopColor="#818cf8"/><stop offset="1" stopColor="#6c7fff"/></linearGradient></defs>
-    <path d="M8 22V14l8-6 8 6v8" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-    <rect x="13" y="16" width="6" height="6" rx="1" stroke="#fff" strokeWidth="1.8"/>
-    <path d="M11 11h10M16 8v3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/>
-  </svg>
+  <img src="/logo.png" alt="Hesapy" width={size} height={size} style={{ borderRadius:"50%", objectFit:"cover", display:"block" }} />
 );
 
 
