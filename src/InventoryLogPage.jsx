@@ -227,7 +227,7 @@ function InventoryLogPage({ inventory, onUpdateInventoryItem, security, pageId, 
                 onFocus={()=>handleItemSearch(itemSearch)}
                 onBlur={()=>setTimeout(()=>setItemSuggestions([]),180)}
                 placeholder="ابحث أو اختر صنف"
-                style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box" }} />
+                style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box",direction:"rtl",textAlign:"right" }} />
               {itemSuggestions.length > 0 && (
                 <div style={{ position:"absolute",top:"100%",right:0,left:0,zIndex:2000,background:C.surface,border:`1px solid ${C.accent}44`,borderRadius:10,boxShadow:"0 8px 30px rgba(0,0,0,0.4)",maxHeight:220,overflowY:"auto",marginTop:4 }}>
                   {itemSuggestions.map(inv=>(

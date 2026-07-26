@@ -284,7 +284,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
                       onFocus={e=>handleItemFocus(i, e)}
                       onBlur={()=>setTimeout(()=>{ setItemSuggestions(prev=>({...prev,[i]:[]})); setActiveItemIdx(null); setDropdownPos(null); }, 180)}
                       placeholder="ابحث أو اختر صنف من القائمة"
-                      style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:"100%" }} />
+                      style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 8px",color:C.text,fontSize:12,fontFamily:"inherit",width:"100%",direction:"rtl",textAlign:"right" }} />
                     {(() => {
                       const matched = it.name ? (inventory||[]).find(inv => inv.name === it.name) : null;
                       return matched ? (
