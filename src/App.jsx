@@ -17,12 +17,18 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isActive, setIsActive] = useState(true);
   const [daysUntilExpiry, setDaysUntilExpiry] = useState(null); // null = no expiry set
-  const [subUser, setSubUser] = useState(null); // { id, owner_id, username, role, allowed_pages, can_add, can_delete, can_edit }
+  const [subUser, setSubUser] = useState(() => {
+    // استرجاع جلسة الموظف بعد Refresh (سيسيون ستوريدج تتمسح لوحدها لو التاب اتقفل)
+    try {
+      const raw = sessionStorage.getItem("sub_user_session");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
   const lastAuthRef = useRef({ uid: null, email: null });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mustSetPassword, setMustSetPassword] = useState(false); // first-login password setup
   const [companyAllowedPages, setCompanyAllowedPages] = useState(null); // null = all pages allowed
-  const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(15); // مدة الخروج التلقائي عند عدم النشاط
+  const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(5); // مدة الخروج التلقائي عند عدم النشاط (افتراضي 5 دقائق)
 
   // ── Auto-logout when tab is closed (not just hidden) ──
   useEffect(() => {
@@ -56,7 +62,7 @@ export default function App() {
     events.forEach(ev => window.addEventListener(ev, markActivity, { passive: true }));
 
     const intervalId = setInterval(() => {
-      const idleMs = (idleTimeoutMinutes || 15) * 60 * 1000;
+      const idleMs = (idleTimeoutMinutes || 5) * 60 * 1000;
       if (Date.now() - lastActivity >= idleMs) {
         if (subUser) { setSubUser(null); setPage("dash"); }
         else if (userId) { supabase.auth.signOut(); }
@@ -76,7 +82,7 @@ export default function App() {
     const table = subUser ? "sub_users" : "profiles";
     const id = subUser ? subUser.id : userId;
     let mySessionId = null;
-    try { mySessionId = sessionStorage.getItem("my_session_id"); } catch {}
+    try { mySessionId = localStorage.getItem("my_session_id"); } catch {}
     if (!mySessionId) return; // ملهوش جلسة متسجلة (مثلاً كان مسجل قبل ما الميزة دي تتفعّل)
 
     const intervalId = setInterval(async () => {
@@ -91,10 +97,32 @@ export default function App() {
         lastAttemptSeenRef.current = result.loginAttemptAt;
         showPermissionToast("تمت محاولة تسجيل الدخول إلى هذا الحساب من جهاز آخر.", "error");
       }
-    }, 20000);
+    }, 10000);
 
     return () => clearInterval(intervalId);
   }, [userId, subUser]);
+
+  // ─── Realtime: لو صلاحيات الموظف اتغيرت من لوحة التحكم، تتطبق فورًا من غير ما يحتاج يسجل دخول تاني ───
+  useEffect(() => {
+    if (!subUser) return;
+    const channel = supabase
+      .channel(`sub-user-${subUser.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sub_users", filter: `id=eq.${subUser.id}` }, (payload) => {
+        if (payload.eventType === "DELETE" || payload.new?.is_active === false) {
+          showPermissionToast("تم إلغاء تفعيل حسابك من قبل الإدارة.", "error");
+          setSubUser(null); setPage("dash");
+          try { sessionStorage.removeItem("sub_user_session"); } catch {}
+          return;
+        }
+        if (payload.new) {
+          setSubUser(payload.new);
+          try { sessionStorage.setItem("sub_user_session", JSON.stringify(payload.new)); } catch {}
+          showPermissionToast("تم تحديث صلاحياتك.", "success");
+        }
+      })
+      .subscribe();
+    return () => { try { supabase.removeChannel(channel); } catch {} };
+  }, [subUser?.id]);
 
   const checkSubscription = async (uid, retries = 2) => {
     if (!uid) return;
@@ -208,10 +236,15 @@ export default function App() {
         if (profile?.company_logo) localStorage.setItem("company_logo_" + ownerId, profile.company_logo);
         else localStorage.removeItem("company_logo_" + ownerId);
       } catch {}
-      setIdleTimeoutMinutes(Number(profile?.idle_timeout_minutes) > 0 ? Number(profile.idle_timeout_minutes) : 15);
+      setIdleTimeoutMinutes(Number(profile?.idle_timeout_minutes) > 0 ? Number(profile.idle_timeout_minutes) : 5);
       setCachedPasscode(profile?.security_passcode || "");
     } catch { /* keep defaults */ }
   };
+
+  // لو الموظف كان مسجل دخول قبل الـ Refresh، نجيب بيانات الشركة تاني (بدل ما نستنى دخول جديد)
+  useEffect(() => {
+    if (subUser) fetchOwnerExtrasForSubUser(subUser.owner_id);
+  }, []);
 
   // Handle sub-user login (called from LoginScreen)
   const handleSubUserLogin = (su) => {
@@ -224,9 +257,10 @@ export default function App() {
 
   const handleSubUserLogout = () => {
     try {
-      const mySessionId = sessionStorage.getItem("my_session_id");
+      const mySessionId = localStorage.getItem("my_session_id");
       if (subUser && mySessionId) releaseSession("sub_users", subUser.id, mySessionId);
-      sessionStorage.removeItem("my_session_id");
+      localStorage.removeItem("my_session_id");
+      sessionStorage.removeItem("sub_user_session");
     } catch {}
     setSubUser(null);
     setPage("dash");
@@ -393,9 +427,9 @@ export default function App() {
   return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={actions} loading={loading}
     userEmail={userEmail} userId={userId} onLogout={()=>{
       try {
-        const mySessionId = sessionStorage.getItem("my_session_id");
+        const mySessionId = localStorage.getItem("my_session_id");
         if (userId && mySessionId) releaseSession("profiles", userId, mySessionId);
-        sessionStorage.removeItem("my_session_id");
+        localStorage.removeItem("my_session_id");
       } catch {}
       supabase.auth.signOut();
     }}

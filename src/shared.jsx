@@ -126,6 +126,19 @@ function useAppData(userId) {
 
   useEffect(() => { if (userId) loadData(); else setData(EMPTY_STATE); }, [userId, loadData]);
 
+  // ─── Realtime: أي تغيير في بيانات الشركة (فواتير، عملاء، موردين، مخزون، موظفين...) ───
+  // يوصل لكل المستخدمين المتصلين لحظيًا من غير ما يحتاجوا Refresh.
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`records-changes-${userId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "records", filter: `user_id=eq.${userId}` }, () => {
+        loadData();
+      })
+      .subscribe();
+    return () => { try { supabase.removeChannel(channel); } catch {} };
+  }, [userId, loadData]);
+
   const ensureCategory = useCallback(async (rawName) => {
     if (!rawName || !rawName.trim()) return;
     setData(prev => {
@@ -823,7 +836,7 @@ function PasswordDialog({ userEmail, onConfirm, onCancel, title = "تأكيد ب
 // عمودين في جدول الحساب: active_session_id (معرّف الجلسة الحالية) و
 // active_session_at (آخر "نبضة" منها). لو جهاز جديد حاول يدخل والجلسة القديمة
 // لسه نشطة (نبضت خلال آخر 45 ثانية)، بيترفض الدخول الجديد فورًا.
-const SESSION_STALE_MS = 45000;
+const SESSION_STALE_MS = 25000;
 
 const generateSessionId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 

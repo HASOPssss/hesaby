@@ -714,7 +714,7 @@ function CompanySettingsPage({ userId, userEmail, companyName: initialCompanyNam
   const [pwForm, setPwForm] = useState({ current:"", newPw:"", confirm:"" });
   const [pwLoading, setPwLoading] = useState(false);
   const [pwMsg, setPwMsg] = useState({ text:"", type:"" });
-  const [idleTimeout, setIdleTimeout] = useState(15);
+  const [idleTimeout, setIdleTimeout] = useState(5);
   const [savingSecurity, setSavingSecurity] = useState(false);
   const [secMsg, setSecMsg] = useState({ text:"", type:"" });
   const [hasPasscode, setHasPasscode] = useState(false);

@@ -131,14 +131,15 @@ function LoginScreen({ onSubUserLogin }) {
       if (!error) {
         const uid = data?.user?.id;
         if (uid) {
-          const claim = await claimSession("profiles", uid);
+          let existing = null; try { existing = localStorage.getItem("my_session_id"); } catch {}
+          const claim = await claimSession("profiles", uid, existing);
           if (!claim.allowed) {
             await supabase.auth.signOut();
             setErr("هذا الحساب قيد الاستخدام على جهاز آخر.");
             setLoading(false);
             return;
           }
-          try { sessionStorage.setItem("my_session_id", claim.sessionId); } catch {}
+          try { localStorage.setItem("my_session_id", claim.sessionId); } catch {}
         }
         setLoading(false); return;
       }
@@ -153,14 +154,15 @@ function LoginScreen({ onSubUserLogin }) {
           if (!err2) {
             const uid2 = data2?.user?.id;
             if (uid2) {
-              const claim2 = await claimSession("profiles", uid2);
+              let existing2 = null; try { existing2 = localStorage.getItem("my_session_id"); } catch {}
+              const claim2 = await claimSession("profiles", uid2, existing2);
               if (!claim2.allowed) {
                 await supabase.auth.signOut();
                 setErr("هذا الحساب قيد الاستخدام على جهاز آخر.");
                 setLoading(false);
                 return;
               }
-              try { sessionStorage.setItem("my_session_id", claim2.sessionId); } catch {}
+              try { localStorage.setItem("my_session_id", claim2.sessionId); } catch {}
             }
             setLoading(false); return;
           } // success — App will detect first_login and show SetPasswordScreen
@@ -186,9 +188,12 @@ function LoginScreen({ onSubUserLogin }) {
       const su = subUsers[0];
       if (su.password_plain !== empForm.password) { setErr("كلمة المرور غير صحيحة"); setLoading(false); return; }
       if (!su.is_active) { setErr("هذا الحساب معطّل، تواصل مع المسؤول"); setLoading(false); return; }
-      const claim = await claimSession("sub_users", su.id, (() => { try { return sessionStorage.getItem("my_session_id"); } catch { return null; } })());
+      const claim = await claimSession("sub_users", su.id, (() => { try { return localStorage.getItem("my_session_id"); } catch { return null; } })());
       if (!claim.allowed) { setErr("هذا الحساب قيد الاستخدام على جهاز آخر."); setLoading(false); return; }
-      try { sessionStorage.setItem("my_session_id", claim.sessionId); } catch {}
+      try {
+        localStorage.setItem("my_session_id", claim.sessionId);
+        sessionStorage.setItem("sub_user_session", JSON.stringify(su)); // للحفاظ على الجلسة بعد Refresh (تتمسح لو قفل التاب)
+      } catch {}
       onSubUserLogin(su);
     } catch(e){ setErr(e.message); }
     setLoading(false);
