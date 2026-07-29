@@ -421,6 +421,27 @@ function useTheme() {
   return [theme, setAppTheme];
 }
 
+// ─── MOBILE DETECTION (لتصميم الموبايل) ───────────────────────────────────────
+// بيتابع عرض الشاشة عن طريق matchMedia (خفيف جداً وما بيعملش أي طلبات شبكة أو
+// إعادة تحميل بيانات — بس بيغيّر شكل الواجهة).
+function useIsMobile(breakpoint = 860) {
+  const [isMobile, setIsMobile] = useState(() => {
+    try { return window.innerWidth <= breakpoint; } catch { return false; }
+  });
+  useEffect(() => {
+    let mq;
+    try { mq = window.matchMedia(`(max-width: ${breakpoint}px)`); } catch { return; }
+    const handler = (e) => setIsMobile(e.matches);
+    if (mq.addEventListener) mq.addEventListener("change", handler);
+    else mq.addListener(handler);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", handler);
+      else mq.removeListener(handler);
+    };
+  }, [breakpoint]);
+  return isMobile;
+}
+
 // ─── ICONS ────────────────────────────────────────────────────────────────────
 const Ic = ({ d, s = 16, c = "currentColor" }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1061,6 +1082,7 @@ const MiniStat = ({ label, value, color=C.text, icon, accent, sub }) => (
 );
 
 const Btn = ({ children, onClick, variant="primary", small=false, style={} }) => {
+  const isMobile = useIsMobile();
   const v = {
     primary: { background:C.accent,color:"#fff",border:"none",boxShadow:`0 4px 15px ${C.accent}30` },
     danger: { background:"transparent",color:C.red,border:`1px solid ${C.red}44` },
@@ -1070,8 +1092,10 @@ const Btn = ({ children, onClick, variant="primary", small=false, style={} }) =>
     purple: { background:C.purpleDim,color:C.purple,border:`1px solid ${C.purple}33` },
     cyan: { background:C.cyanDim,color:C.cyan,border:`1px solid ${C.cyan}33` },
   };
+  const basePad = small ? "5px 12px" : (isMobile ? "11px 18px" : "8px 18px");
+  const baseMinH = small ? undefined : (isMobile ? 44 : undefined);
   return (
-    <button onClick={onClick} style={{ ...v[variant],borderRadius:9,padding:small?"5px 12px":"8px 18px",fontSize:small?12:13,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,fontFamily:"inherit",transition:"all 0.2s",...style }}>
+    <button onClick={onClick} style={{ ...v[variant],borderRadius:9,padding:basePad,minHeight:baseMinH,fontSize:small?12:13,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit",transition:"all 0.2s",...style }}>
       {children}
     </button>
   );
@@ -1275,36 +1299,54 @@ function MonthPicker({ label, value, onChange, required=false }) {
   );
 }
 
-const Inp = ({ label, value, onChange, type="text", placeholder="", required=false }) => (
-  <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
-    {label && <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{label}{required && <span style={{ color:C.red }}> *</span>}</label>}
-    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
-      style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",transition:"border-color 0.2s" }}
-      onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
-  </div>
-);
-
-const Sel = ({ label, value, onChange, options, placeholder="-- اختر --" }) => (
-  <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
-    {label && <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{label}</label>}
-    <select value={value} onChange={e=>onChange(e.target.value)} style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none" }}>
-      <option value="">{placeholder}</option>
-      {options.map(o=><option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
-    </select>
-  </div>
-);
-
-const Modal = ({ title, onClose, children, wide=false }) => (
-  <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16 }}>
-    <div style={{ background:C.surface,border:`1px solid ${C.borderLight}`,borderRadius:20,padding:28,width:wide?"min(780px,95vw)":"min(540px,95vw)",maxHeight:"90vh",overflowY:"auto",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,boxShadow:`0 30px 80px rgba(0,0,0,0.7)` }}>
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:22 }}>
-        <h2 style={{ margin:0,fontSize:17,fontWeight:700,color:C.text }}>{title}</h2>
-        <button onClick={onClose} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:6,display:"flex" }}><Ic d={I.close} s={16} /></button>
-      </div>
-      {children}
+const Inp = ({ label, value, onChange, type="text", placeholder="", required=false }) => {
+  const isMobile = useIsMobile();
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+      {label && <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{label}{required && <span style={{ color:C.red }}> *</span>}</label>}
+      <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+        style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:isMobile?"12px 13px":"9px 13px",color:C.text,fontSize:isMobile?16:13,fontFamily:"inherit",outline:"none",transition:"border-color 0.2s",boxSizing:"border-box",width:"100%" }}
+        onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
     </div>
-  </div>
-);
+  );
+};
+
+const Sel = ({ label, value, onChange, options, placeholder="-- اختر --" }) => {
+  const isMobile = useIsMobile();
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+      {label && <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{label}</label>}
+      <select value={value} onChange={e=>onChange(e.target.value)} style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:isMobile?"12px 13px":"9px 13px",color:C.text,fontSize:isMobile?16:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box",width:"100%" }}>
+        <option value="">{placeholder}</option>
+        {options.map(o=><option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
+      </select>
+    </div>
+  );
+};
+
+const Modal = ({ title, onClose, children, wide=false }) => {
+  const isMobile = useIsMobile();
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:isMobile?"flex-end":"center",justifyContent:"center",zIndex:1000,padding:isMobile?0:16 }}>
+      <div style={{
+        background:C.surface,border:`1px solid ${C.borderLight}`,
+        borderRadius:isMobile?"18px 18px 0 0":20,
+        padding:isMobile?18:28,
+        width:isMobile?"100%":(wide?"min(780px,95vw)":"min(540px,95vw)"),
+        maxHeight:isMobile?"92vh":"90vh", overflowY:"auto",
+        scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,
+        boxShadow:`0 30px 80px rgba(0,0,0,0.7)`,
+        boxSizing:"border-box",
+      }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isMobile?16:22 }}>
+          <h2 style={{ margin:0,fontSize:isMobile?15:17,fontWeight:700,color:C.text }}>{title}</h2>
+          <button onClick={onClose} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",color:C.textMuted,padding:8,display:"flex",flexShrink:0 }}><Ic d={I.close} s={16} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+};
 
 const THead = ({ cols }) => (
   <thead>
@@ -1446,7 +1488,7 @@ export {
   supabase, supabaseAdmin,
   claimSession, heartbeatSession, releaseSession,
   normalizeArabic, resolveCategory, EMPTY_STATE, useAppData,
-  useTheme, setAppTheme,
+  useTheme, setAppTheme, useIsMobile,
   Ic, I,
   fmt, fmtDateTime, fmtNum, nowISO, today, getMonth,
   openPrint, getCompanyBranding, printInvoice, printTaxInvoice, printStocktakeReport, printStocktakeUpdateReport, printFinancialReport,

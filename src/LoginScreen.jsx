@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase, C, Ic, I, Logo, Card, useTheme, claimSession } from "./shared";
+import { supabase, C, Ic, I, Logo, Card, useTheme, useIsMobile, claimSession } from "./shared";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // LoginScreen.jsx — شاشات الدخول: تسجيل الدخول، تعيين كلمة مرور أول مرة، وشاشة
@@ -7,9 +7,10 @@ import { supabase, C, Ic, I, Logo, Card, useTheme, claimSession } from "./shared
 // ══════════════════════════════════════════════════════════════════════════════
 
 function SubscriptionExpired() {
+  const isMobile = useIsMobile();
   return (
     <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl" }}>
-      <div style={{ background:C.surface,border:`2px solid ${C.red}33`,borderRadius:24,padding:"48px 52px",width:"min(440px,90vw)",display:"flex",flexDirection:"column",alignItems:"center",gap:22,textAlign:"center",boxShadow:`0 0 60px ${C.red}11` }}>
+      <div style={{ background:C.surface,border:`2px solid ${C.red}33`,borderRadius:24,padding:isMobile?"32px 22px":"48px 52px",width:"min(440px,92vw)",display:"flex",flexDirection:"column",alignItems:"center",gap:22,textAlign:"center",boxShadow:`0 0 60px ${C.red}11`,boxSizing:"border-box" }}>
         <div style={{ width:80,height:80,borderRadius:"50%",background:C.redDim,border:`2px solid ${C.red}44`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 30px ${C.red}22` }}>
           <Ic d={I.alert} s={36} c={C.red} />
         </div>
@@ -48,11 +49,12 @@ function SetPasswordScreen({ userId, userEmail, onDone }) {
     setLoading(false);
   };
 
-  const inp = { background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"11px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box" };
+  const inp = { background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px",color:C.text,fontSize:16,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box" };
+  const isMobile = useIsMobile();
 
   return (
     <div style={{ minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl" }}>
-      <div style={{ background:C.surface,border:`2px solid ${C.accent}33`,borderRadius:24,padding:"44px 48px",width:"min(440px,90vw)",display:"flex",flexDirection:"column",gap:22,boxShadow:`0 0 80px ${C.accent}11` }}>
+      <div style={{ background:C.surface,border:`2px solid ${C.accent}33`,borderRadius:24,padding:isMobile?"28px 20px":"44px 48px",width:"min(440px,92vw)",display:"flex",flexDirection:"column",gap:22,boxShadow:`0 0 80px ${C.accent}11`,boxSizing:"border-box" }}>
         {/* Header */}
         <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:14,textAlign:"center" }}>
           <div style={{ width:72,height:72,borderRadius:"50%",background:C.accentDim,border:`2px solid ${C.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 30px ${C.accent}22` }}>
@@ -113,6 +115,7 @@ function SetPasswordScreen({ userId, userEmail, onDone }) {
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
 function LoginScreen({ onSubUserLogin }) {
   const [theme, setThemeState] = useTheme();
+  const isMobile = useIsMobile();
   const [mode, setMode] = useState("company");
   const lastEmail = (() => { try { return localStorage.getItem("last_login_email")||""; } catch { return ""; } })();
   const [form, setForm] = useState({ email: lastEmail, password:"" });
@@ -201,7 +204,7 @@ function LoginScreen({ onSubUserLogin }) {
 
   const inp = {
     background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
-    padding: "11px 14px", color: C.text, fontSize: 13, fontFamily: "inherit",
+    padding: "13px 14px", color: C.text, fontSize: 16, fontFamily: "inherit",
     outline: "none", width: "100%", boxSizing: "border-box", transition: "border-color 0.2s",
   };
 
@@ -222,7 +225,7 @@ function LoginScreen({ onSubUserLogin }) {
       <div style={{ position:"absolute",top:"35%",left:"15%",width:180,height:180,borderRadius:"50%",background:`radial-gradient(circle, ${C.purpleDim} 0%, transparent 70%)`,pointerEvents:"none" }} />
 
       {/* ── Card ── */}
-      <div style={{ background:C.surface, border:`1px solid ${C.borderLight}`, borderRadius:28, padding:"44px 48px", width:"min(440px,92vw)", display:"flex", flexDirection:"column", position:"relative", zIndex:1, boxShadow:`0 40px 100px rgba(0,0,0,0.4), 0 0 0 1px ${C.accent}0a` }}>
+      <div style={{ background:C.surface, border:`1px solid ${C.borderLight}`, borderRadius:isMobile?20:28, padding:isMobile?"28px 20px":"44px 48px", width:"min(440px,92vw)", display:"flex", flexDirection:"column", position:"relative", zIndex:1, boxShadow:`0 40px 100px rgba(0,0,0,0.4), 0 0 0 1px ${C.accent}0a`, boxSizing:"border-box" }}>
 
         {/* Logo & title */}
         <div style={{ textAlign:"center", marginBottom:30 }}>
