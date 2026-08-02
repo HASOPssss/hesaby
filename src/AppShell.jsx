@@ -5,6 +5,7 @@ import InvoicesPage from "./InvoicesPage";
 import UnifiedReportsPage from "./UnifiedReportsPage";
 import TaxReportsPage from "./TaxReportsPage";
 import ProductionCostPage from "./ProductionCostPage";
+import AnalyticsDashboard from "./AnalyticsDashboard";
 import EmployeesPage from "./EmployeesPage";
 import ActivityLogPage from "./ActivityLogPage";
 import InventoryLogPage from "./InventoryLogPage";
@@ -19,7 +20,7 @@ import TaxInvoicesPage from "./TaxInvoicesPage";
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ─── APP SHELL (Sidebar + Content) ────────────────────────────────────────────
-function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail, userId, onLogout, roleBadge, sidebarCollapsed, setSidebarCollapsed, daysUntilExpiry, security }) {
+function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail, userId, onLogout, roleBadge, sidebarCollapsed, setSidebarCollapsed, daysUntilExpiry, security, allowedPages }) {
   const isMobile = useIsMobile();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const W = isMobile ? Math.min(280, Math.round(window.innerWidth*0.82)) : (sidebarCollapsed ? 68 : 230);
@@ -36,6 +37,7 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
   const renderPage = () => {
     switch (effectivePage) {
       case "dash": return <Dashboard data={data} daysUntilExpiry={daysUntilExpiry} inventory={data.inventory} />;
+      case "analytics": return <AnalyticsDashboard data={data} security={security} allowedPages={allowedPages} setPage={setPage} />;
       case "sales": return <InvoicesPage title="فواتير المبيعات" invoices={data.salesInvoices} type="sales" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addSale} onUpdate={actions.updateSale} onDelete={actions.deleteSale} onAddClient={actions.addClient} userEmail={userEmail} inventory={data.inventory} onAddInventoryItem={actions.addInventoryItem} onUpdateInventoryItem={actions.updateInventoryItem} security={security} pageId="sales" />;
       case "purchases": return <InvoicesPage title="فواتير المشتريات" invoices={data.purchaseInvoices} type="purchases" clients={data.clients} suppliers={data.suppliers} categories={data.categories} onAdd={actions.addPurchase} onUpdate={actions.updatePurchase} onDelete={actions.deletePurchase} onAddSupplier={actions.addSupplier} userEmail={userEmail} inventory={data.inventory} onAddInventoryItem={actions.addInventoryItem} onUpdateInventoryItem={actions.updateInventoryItem} security={security} pageId="purchases" />;
       case "clients": return <AccountStatement parties={data.clients} invoices={data.salesInvoices} type="client" onAddParty={actions.addClient} onDeleteParty={actions.deleteClient} security={security} pageId="clients" userEmail={userEmail} />;
@@ -45,9 +47,9 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
       case "reports": return <UnifiedReportsPage data={data} userEmail={userEmail} security={security} pageId="reports" />;
       case "taxreports": return <TaxReportsPage data={data} />;
       case "taxinvoices": return <TaxInvoicesPage salesInvoices={data.salesInvoices} purchaseInvoices={data.purchaseInvoices} theme={theme} />;
-      case "expenses": return <ExpensesPage userId={userId||""} security={security} pageId="expenses" userEmail={userEmail} />;
-      case "receipts": return <ReceiptsPage userId={userId||""} security={security} pageId="receipts" userEmail={userEmail} />;
-      case "production": return <ProductionCostPage data={data} actions={actions} />;
+      case "expenses": return <ExpensesPage expenses={data.expenses} onAdd={actions.addExpense} onUpdate={actions.updateExpense} onDelete={actions.deleteExpense} security={security} pageId="expenses" userEmail={userEmail} />;
+      case "receipts": return <ReceiptsPage receipts={data.receipts} onAdd={actions.addReceipt} onUpdate={actions.updateReceipt} onDelete={actions.deleteReceipt} security={security} pageId="receipts" userEmail={userEmail} />;
+      case "production": return <ProductionCostPage data={data} actions={actions} security={security} />;
       case "employees": return <EmployeesPage
         employees={data.employees} salaries={data.salaries} attendance={data.attendance} advances={data.advances} salaryArchive={data.salaryArchive}
         onAddEmployee={actions.addEmployee} onUpdateEmployee={actions.updateEmployee} onDeleteEmployee={actions.deleteEmployee}

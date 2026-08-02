@@ -178,7 +178,8 @@ function TaxReportsPage({ data }) {
           </div>
           <Card style={{ padding:0 }}>
             <div style={{ padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>تفاصيل الضرائب — {selectedMonth}</div>
-            <table style={{ width:"100%",borderCollapse:"collapse" }}>
+            <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+            <table style={{ width:"100%",minWidth:640,borderCollapse:"collapse" }}>
               <THead cols={["اسم الضريبة","النوع","نوع المنشأة","النسبة/المبلغ","الأساس","المبلغ المحسوب"]} />
               <tbody>
                 <TRow alt={false}>
@@ -206,6 +207,7 @@ function TaxReportsPage({ data }) {
                 </tr>
               </tbody>
             </table>
+            </div>
           </Card>
         </div>
       )}
@@ -224,7 +226,8 @@ function TaxReportsPage({ data }) {
             </Card>
           ) : (
             <Card style={{ padding:0 }}>
-              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+              <table style={{ width:"100%",minWidth:760,borderCollapse:"collapse" }}>
                 <THead cols={["الاسم","النوع","نوع المنشأة","النسبة","الأساس","الدورية","ملاحظات",""]} />
                 <tbody>
                   {taxRules.map((r,i)=>(
@@ -243,6 +246,7 @@ function TaxReportsPage({ data }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             </Card>
           )}
         </div>

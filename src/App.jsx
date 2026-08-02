@@ -75,34 +75,32 @@ export default function App() {
     };
   }, [userId, subUser, idleTimeoutMinutes]);
 
-  // ── نبضة الجلسة الواحدة: تتأكد إن الجهاز ده لسه صاحب الجلسة النشطة، وتبلغ لو حد حاول يدخل من جهاز تاني ──
-  const lastAttemptSeenRef = useRef(null);
+  // ── نبضة الجلسة الواحدة (Fallback على الـ Realtime): بتتأكد إن الجهاز ده لسه
+  // صاحب جلسة الموظف النشطة. حساب الشركة نفسه مش خاضع لأي تتبع جلسات إطلاقًا. ──
   useEffect(() => {
-    if (!userId && !subUser) return;
-    const table = subUser ? "sub_users" : "profiles";
-    const id = subUser ? subUser.id : userId;
+    if (!subUser) return; // ميزة الجهاز الواحد للموظفين بس — حساب الشركة مستثنى تمامًا
     let mySessionId = null;
     try { mySessionId = localStorage.getItem("my_session_id"); } catch {}
     if (!mySessionId) return; // ملهوش جلسة متسجلة (مثلاً كان مسجل قبل ما الميزة دي تتفعّل)
 
     const intervalId = setInterval(async () => {
-      const result = await heartbeatSession(table, id, mySessionId);
+      const result = await heartbeatSession("sub_users", subUser.id, mySessionId);
       if (!result.stillValid) {
-        showPermissionToast("تم تسجيل الدخول لهذا الحساب من جهاز آخر، فتم إنهاء هذه الجلسة.", "error");
-        if (subUser) { setSubUser(null); setPage("dash"); }
-        else { supabase.auth.signOut(); }
-        return;
-      }
-      if (result.loginAttemptAt && result.loginAttemptAt !== lastAttemptSeenRef.current) {
-        lastAttemptSeenRef.current = result.loginAttemptAt;
-        showPermissionToast("تمت محاولة تسجيل الدخول إلى هذا الحساب من جهاز آخر.", "error");
+        showPermissionToast("تم تسجيل الدخول إلى هذا الحساب من جهاز آخر، وسيتم تسجيل خروجك.", "error");
+        setSubUser(null); setPage("dash");
+        try { sessionStorage.removeItem("sub_user_session"); localStorage.removeItem("my_session_id"); } catch {}
       }
     }, 10000);
 
     return () => clearInterval(intervalId);
-  }, [userId, subUser]);
+  }, [subUser?.id]);
 
-  // ─── Realtime: لو صلاحيات الموظف اتغيرت من لوحة التحكم، تتطبق فورًا من غير ما يحتاج يسجل دخول تاني ───
+  // ─── Realtime: (أ) لو صلاحيات الموظف اتغيرت من لوحة التحكم، تتطبق فورًا من غير
+  // ما يحتاج يسجل دخول تاني. (ب) لو حد سجل دخول بنفس حساب الموظف من جهاز تاني،
+  // الجهاز ده يتسجل خروجه فورًا (أسرع من انتظار نبضة الـ 10 ثواني) ───
+  const subUserRef = useRef(subUser);
+  useEffect(() => { subUserRef.current = subUser; }, [subUser]);
+
   useEffect(() => {
     if (!subUser) return;
     const channel = supabase
@@ -111,14 +109,30 @@ export default function App() {
         if (payload.eventType === "DELETE" || payload.new?.is_active === false) {
           showPermissionToast("تم إلغاء تفعيل حسابك من قبل الإدارة.", "error");
           setSubUser(null); setPage("dash");
-          try { sessionStorage.removeItem("sub_user_session"); } catch {}
+          try { sessionStorage.removeItem("sub_user_session"); localStorage.removeItem("my_session_id"); } catch {}
           return;
         }
-        if (payload.new) {
-          setSubUser(payload.new);
-          try { sessionStorage.setItem("sub_user_session", JSON.stringify(payload.new)); } catch {}
-          showPermissionToast("تم تحديث صلاحياتك.", "success");
+        if (!payload.new) return;
+
+        // جهاز تاني سجل دخول بنفس الحساب ده — الجلسة الحالية (الجهاز ده) تتقفل فورًا
+        let mySessionId = null;
+        try { mySessionId = localStorage.getItem("my_session_id"); } catch {}
+        if (mySessionId && payload.new.active_session_id && payload.new.active_session_id !== mySessionId) {
+          showPermissionToast("تم تسجيل الدخول إلى هذا الحساب من جهاز آخر، وسيتم تسجيل خروجك.", "error");
+          setSubUser(null); setPage("dash");
+          try { sessionStorage.removeItem("sub_user_session"); localStorage.removeItem("my_session_id"); } catch {}
+          return;
         }
+
+        // نحدّث الصلاحيات دايمًا، لكن الرسالة تظهر بس لو فعلاً اتغير حاجة تخص
+        // الصلاحيات (مش مجرد كتابة تانية على نفس الصف زي نبضة الجلسة)
+        const PERM_FIELDS = ["can_add","can_edit","can_delete","allowed_pages","sensitive_pages","role","role_template","display_name","username"];
+        const before = subUserRef.current || {};
+        const permsChanged = PERM_FIELDS.some(f => JSON.stringify(payload.new[f]) !== JSON.stringify(before[f]));
+
+        setSubUser(payload.new);
+        try { sessionStorage.setItem("sub_user_session", JSON.stringify(payload.new)); } catch {}
+        if (permsChanged) showPermissionToast("تم تحديث صلاحياتك.", "success");
       })
       .subscribe();
     return () => { try { supabase.removeChannel(channel); } catch {} };
@@ -281,7 +295,10 @@ export default function App() {
     const perms = { canAdd: subUser.can_add, canDelete: subUser.can_delete, canEdit: subUser.can_edit };
 
     const navGroups = [
-      { label:"الرئيسية", items:[{ id:"dash", label:"الرئيسية", icon:I.dash }] },
+      { label:"الرئيسية", items:[
+        { id:"dash", label:"الرئيسية", icon:I.dash },
+        { id:"analytics", label:"لوحة الإحصائيات", icon:I.report },
+      ]},
       { label:"المالية", items:[
         { id:"sales", label:"المبيعات", icon:I.sales },
         { id:"purchases", label:"المشتريات", icon:I.purchase },
@@ -351,6 +368,12 @@ export default function App() {
       archiveSalaryMonth: perms.canAdd ? actions.archiveSalaryMonth : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
       deleteSalaryArchive: perms.canDelete ? actions.deleteSalaryArchive : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
       restoreSalaryArchive: perms.canEdit ? actions.restoreSalaryArchive : ()=>showPermissionToast("ليس لديك صلاحية التعديل"),
+      addReceipt: perms.canAdd ? actions.addReceipt : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteReceipt: perms.canDelete ? actions.deleteReceipt : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addExpense: perms.canAdd ? actions.addExpense : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteExpense: perms.canDelete ? actions.deleteExpense : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
+      addProduction: perms.canAdd ? actions.addProduction : ()=>showPermissionToast("ليس لديك صلاحية الإضافة"),
+      deleteProduction: perms.canDelete ? actions.deleteProduction : ()=>showPermissionToast("ليس لديك صلاحية الحذف", "error"),
     };
 
     // سياق الصلاحيات الحساسة (Passcode): هل مسموح للموظف يحاول العملية دي أصلاً
@@ -374,6 +397,7 @@ export default function App() {
       roleBadge={<span style={{ background:C.purpleDim,color:C.purple,border:`1px solid ${C.purple}33`,borderRadius:20,padding:"2px 10px",fontSize:10,fontWeight:700 }}>{subUser.role}</span>}
       sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}
       security={security}
+      allowedPages={allowedPages}
     />;
   }
 
@@ -383,7 +407,10 @@ export default function App() {
   if (!isActive) return <SubscriptionExpired />;
 
   const ALL_NAV_GROUPS = [
-    { label:"الرئيسية", items:[{ id:"dash", label:"الرئيسية", icon:I.dash }] },
+    { label:"الرئيسية", items:[
+      { id:"dash", label:"الرئيسية", icon:I.dash },
+      { id:"analytics", label:"لوحة الإحصائيات", icon:I.report },
+    ]},
     { label:"المالية", items:[
       { id:"sales", label:"المبيعات", icon:I.sales },
       { id:"purchases", label:"المشتريات", icon:I.purchase },
@@ -426,16 +453,13 @@ export default function App() {
 
   return <AppShell page={page} setPage={setPage} navGroups={navGroups} data={data} actions={actions} loading={loading}
     userEmail={userEmail} userId={userId} onLogout={()=>{
-      try {
-        const mySessionId = localStorage.getItem("my_session_id");
-        if (userId && mySessionId) releaseSession("profiles", userId, mySessionId);
-        localStorage.removeItem("my_session_id");
-      } catch {}
+      // حساب الشركة مش خاضع لتتبع الجلسات — تسجيل خروج عادي بدون أي تنظيف جلسات
       supabase.auth.signOut();
     }}
     sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed}
     daysUntilExpiry={daysUntilExpiry}
     security={ownerSecurity}
+    allowedPages={companyAllowedPages}
   />;
 }
 

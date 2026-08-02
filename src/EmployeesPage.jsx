@@ -448,7 +448,8 @@ function EmployeesPage({
       {/* Employees Tab */}
       {tab==="employees" && (
         <Card style={{ padding:0 }}>
-          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+          <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+          <table style={{ width:"100%",minWidth:760,borderCollapse:"collapse" }}>
             <THead cols={["الكود","الاسم","المنصب","الراتب الأساسي","الهاتف","تاريخ التعيين","ملاحظات",""]} />
             <tbody>
               {employees.map((e,idx)=>(
@@ -470,6 +471,7 @@ function EmployeesPage({
               ))}
             </tbody>
           </table>
+          </div>
           {employees.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا يوجد موظفون بعد</div>}
         </Card>
       )}
@@ -491,7 +493,8 @@ function EmployeesPage({
           <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
             <span style={{ fontSize:13,fontWeight:700,color:C.text }}>كشف المرتبات</span>
           </div>
-          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+          <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+          <table style={{ width:"100%",minWidth:900,borderCollapse:"collapse" }}>
             <THead cols={["رقم","الشهر","الموظف","الراتب الأساسي","مكافآت","خصم غياب","خصم إجازة","خصم تأخر","سلف","خصومات أخرى","صافي المرتب","وقت الصرف",""]} />
             <tbody>
               {activeSalaries.map((s,idx)=>(
@@ -518,6 +521,7 @@ function EmployeesPage({
               ))}
             </tbody>
           </table>
+          </div>
           {activeSalaries.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد سجلات مرتبات (المُأرشفة لا تظهر هنا)</div>}
         </Card>
       )}
@@ -525,7 +529,8 @@ function EmployeesPage({
       {/* Deductions Tab */}
       {tab==="attendance" && (
         <Card style={{ padding:0 }}>
-          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+          <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+          <table style={{ width:"100%",minWidth:620,borderCollapse:"collapse" }}>
             <THead cols={["رقم","التاريخ","الموظف","النوع","قيمة الخصم","السبب","الحالة"]} />
             <tbody>
               {attendance.map((a,idx)=>(
@@ -553,6 +558,7 @@ function EmployeesPage({
               ))}
             </tbody>
           </table>
+          </div>
           {attendance.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد خصومات مسجلة</div>}
         </Card>
       )}
@@ -560,7 +566,8 @@ function EmployeesPage({
       {/* Advances Tab */}
       {tab==="advances" && (
         <Card style={{ padding:0 }}>
-          <table style={{ width:"100%",borderCollapse:"collapse" }}>
+          <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+          <table style={{ width:"100%",minWidth:620,borderCollapse:"collapse" }}>
             <THead cols={["رقم","التاريخ","الموظف","المبلغ","السبب","الحالة",""]} />
             <tbody>
               {advances.map((a,idx)=>(
@@ -583,6 +590,7 @@ function EmployeesPage({
               ))}
             </tbody>
           </table>
+          </div>
           {advances.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد سلف</div>}
         </Card>
       )}
@@ -633,7 +641,8 @@ function EmployeesPage({
                       </Btn>
                     </div>
                   </div>
-                  <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+                  <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+                  <table style={{ width:"100%",minWidth:700,borderCollapse:"collapse",fontSize:12 }}>
                     <THead cols={["الموظف","الراتب الأساسي","إجمالي الخصومات","صافي المرتب","وقت الصرف"]} />
                     <tbody>
                       {arch.salaries.map((s,idx)=>(
@@ -647,6 +656,7 @@ function EmployeesPage({
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               );
             })

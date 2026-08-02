@@ -264,8 +264,8 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
           <label style={{ fontSize:13,fontWeight:600,color:C.textDim }}>الأصناف</label>
           <Btn small onClick={addItem}><Ic d={I.plus} s={12} />إضافة صنف</Btn>
         </div>
-        <div style={{ background:C.surface2,borderRadius:12,overflow:"visible",border:`1px solid ${C.border}` }}>
-          <table style={{ width:"100%",borderCollapse:"collapse",borderRadius:12,overflow:"hidden" }}>
+        <div style={{ background:C.surface2,borderRadius:12,border:`1px solid ${C.border}`,overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+          <table style={{ width:"100%",minWidth:640,borderCollapse:"collapse" }}>
             <THead cols={["الفئة","اسم الصنف","الكمية","السعر","الإجمالي",""]} />
             <tbody>
               {items.map((it,i)=>(

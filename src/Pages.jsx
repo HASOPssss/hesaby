@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  supabase, normalizeArabic, C, Ic, I, fmt, fmtNum, today,
+  supabase, normalizeArabic, C, Ic, I, fmt, fmtNum, today, useIsMobile,
   printStocktakeReport, printStocktakeUpdateReport, downloadInventoryTemplate, parseInventoryCSV,
   ConfirmDialog, usePasscodeGate, setCachedPasscode, logActivity, Badge, Card, GlowCard, MiniStat, Btn,
   DatePicker, MonthPicker, Inp, Sel, Modal, THead, TRow, TD, PageHeader,
@@ -146,6 +146,7 @@ function Dashboard({ data, daysUntilExpiry, inventory }) {
 
 // ─── ACCOUNT STATEMENT (العملاء والموردين) ────────────────────────────────────
 function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, security, pageId, userEmail }) {
+  const isMobile = useIsMobile();
   const [selected, setSelected] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ name:"",phone:"" });
@@ -184,7 +185,7 @@ function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, 
           </div>
         </Modal>
       )}
-      <div style={{ display:"grid",gridTemplateColumns:"260px 1fr",gap:18,alignItems:"start" }}>
+      <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"260px 1fr",gap:18,alignItems:"start" }}>
         <Card style={{ padding:0 }}>
           <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:11,fontWeight:700,color:C.textMuted,letterSpacing:0.5 }}>
             قائمة {isClient?"العملاء":"الموردين"} ({parties.length})
@@ -228,7 +229,8 @@ function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, 
               </Card>
               <Card style={{ padding:0 }}>
                 <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>سجل الفواتير</div>
-                <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+                <table style={{ width:"100%",minWidth:560,borderCollapse:"collapse" }}>
                   <THead cols={["رقم الفاتورة","التاريخ","الإجمالي","المدفوع","المتبقي","الحالة"]} />
                   <tbody>
                     {stmt.map((inv,i)=>(
@@ -243,6 +245,7 @@ function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, 
                     ))}
                   </tbody>
                 </table>
+                </div>
                 {stmt.length===0 && <div style={{ padding:20,textAlign:"center",color:C.textMuted,fontSize:12 }}>لا توجد فواتير</div>}
               </Card>
             </div>
@@ -985,7 +988,8 @@ function CompanySettingsPage({ userId, userEmail, companyName: initialCompanyNam
             ) : subUsersList.length===0 ? (
               <div style={{ padding:30,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا يوجد موظفين مضافين بعد</div>
             ) : (
-              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+              <table style={{ width:"100%",minWidth:520,borderCollapse:"collapse" }}>
                 <THead cols={["اسم المستخدم","الاسم الظاهر","الدور","الحالة",""]} />
                 <tbody>
                   {subUsersList.map((su,idx)=>(
@@ -1003,6 +1007,7 @@ function CompanySettingsPage({ userId, userEmail, companyName: initialCompanyNam
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </Card>
@@ -1026,28 +1031,24 @@ function CompanySettingsPage({ userId, userEmail, companyName: initialCompanyNam
 }
 
 // ─── RECEIPTS PAGE (المقبوضات) ─────────────────────────────────────────────────
-function ReceiptsPage({ userId, security, pageId, userEmail }) {
-  const storageKey = "receipts_" + (userId || "local");
-  const [receipts, setReceipts] = useState(() => { try { return JSON.parse(localStorage.getItem(storageKey)||"[]"); } catch { return []; } });
+function ReceiptsPage({ receipts=[], onAdd, onUpdate, onDelete, security, pageId, userEmail }) {
   const [showModal, setShowModal] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState(null);
   const { requestPasscode, PasscodeGate, log } = usePasscodeGate(security);
   const emptyForm = { date: new Date().toISOString().split("T")[0], payer:"", amount:"", paymentMethod:"نقدي", checkNumber:"", checkDate:"", notes:"" };
   const [form, setForm] = useState(emptyForm);
 
-  const save = (list) => { setReceipts(list); try { localStorage.setItem(storageKey, JSON.stringify(list)); } catch {} };
-
   const handleAdd = () => {
     if (!form.payer.trim() || !form.amount) return;
     const amount = parseFloat(form.amount)||0;
     if (editingReceipt) {
       const updatedRec = { ...editingReceipt, ...form, amount };
-      save(receipts.map(r => r.id===editingReceipt.id ? updatedRec : r));
+      onUpdate(updatedRec);
       log({ actionType:"تعديل", section:"المقبوضات", target:`${editingReceipt.id} — ${form.payer}`, before:editingReceipt, after:updatedRec });
       setEditingReceipt(null);
     } else {
       const rec = { ...form, id:"RCP"+Date.now(), amount, createdAt: new Date().toISOString() };
-      save([rec, ...receipts]);
+      onAdd(rec);
     }
     setForm(emptyForm);
     setShowModal(false);
@@ -1065,7 +1066,7 @@ function ReceiptsPage({ userId, security, pageId, userEmail }) {
   const handleDeleteClick = (r) => {
     requestPasscode({
       pageId, kind:"delete", label:"حذف سند قبض",
-      onConfirm: () => { save(receipts.filter(x=>x.id!==r.id)); log({ actionType:"حذف", section:"المقبوضات", target:`${r.id} — ${r.payer}`, before:r, after:null }); },
+      onConfirm: () => { onDelete(r.id); log({ actionType:"حذف", section:"المقبوضات", target:`${r.id} — ${r.payer}`, before:r, after:null }); },
     });
   };
 
@@ -1090,7 +1091,8 @@ function ReceiptsPage({ userId, security, pageId, userEmail }) {
       </div>
 
       <Card style={{ padding:0 }}>
-        <table style={{ width:"100%",borderCollapse:"collapse" }}>
+        <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+        <table style={{ width:"100%",minWidth:700,borderCollapse:"collapse" }}>
           <THead cols={["رقم السند","التاريخ","المدفوع من","المبلغ","طريقة الدفع","ملاحظات",""]} />
           <tbody>
             {receipts.map((r,i)=>(
@@ -1116,6 +1118,7 @@ function ReceiptsPage({ userId, security, pageId, userEmail }) {
             ))}
           </tbody>
         </table>
+        </div>
         {receipts.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد مقبوضات بعد</div>}
       </Card>
 
@@ -1173,10 +1176,7 @@ function ReceiptsPage({ userId, security, pageId, userEmail }) {
 // ─── SUBSCRIPTION EXPIRY BELL ────────────────────────────────────────────────
 
 // ─── EXPENSES PAGE ────────────────────────────────────────────────────────────
-function ExpensesPage({ userId="", security, pageId, userEmail }) {
-  const [expenses, setExpenses] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("expenses_local")||"[]"); } catch { return []; }
-  });
+function ExpensesPage({ expenses=[], onAdd, onUpdate, onDelete, security, pageId, userEmail }) {
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const { requestPasscode, PasscodeGate, log } = usePasscodeGate(security);
@@ -1187,22 +1187,17 @@ function ExpensesPage({ userId="", security, pageId, userEmail }) {
 
   const expenseCategories = ["إيجار","كهرباء","مياه","غاز","إنترنت","تأمين","صيانة","مواصلات","تسويق","قرطاسية","رسوم قانونية","ضرائب","أخرى"];
 
-  const save = (list) => {
-    setExpenses(list);
-    localStorage.setItem("expenses_local", JSON.stringify(list));
-  };
-
   const handleSave = () => {
     if (!form.description.trim()||!form.amount) return;
     const amount = parseFloat(form.amount)||0;
     if (editingExpense) {
       const updatedRec = { ...editingExpense, ...form, amount };
-      save(expenses.map(e => e.id===editingExpense.id ? updatedRec : e));
+      onUpdate(updatedRec);
       log({ actionType:"تعديل", section:"المصروفات", target:`${editingExpense.id} — ${form.description}`, before:editingExpense, after:updatedRec });
       setEditingExpense(null);
     } else {
       const rec = { id:"EXP"+Date.now().toString().slice(-5), ...form, amount };
-      save([...expenses, rec]);
+      onAdd(rec);
     }
     setShowModal(false);
     setForm(emptyForm);
@@ -1220,7 +1215,7 @@ function ExpensesPage({ userId="", security, pageId, userEmail }) {
   const handleDeleteClick = (e) => {
     requestPasscode({
       pageId, kind:"delete", label:"حذف مصروف",
-      onConfirm: () => { save(expenses.filter(x=>x.id!==e.id)); log({ actionType:"حذف", section:"المصروفات", target:`${e.id} — ${e.description}`, before:e, after:null }); },
+      onConfirm: () => { onDelete(e.id); log({ actionType:"حذف", section:"المصروفات", target:`${e.id} — ${e.description}`, before:e, after:null }); },
     });
   };
 

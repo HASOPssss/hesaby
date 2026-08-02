@@ -43,6 +43,8 @@ const EMPTY_STATE = {
   returns: [], categories: ["إلكترونيات","مواد خام","معدات","مستلزمات مكتبية","آلات","أغذية","ملابس","أدوات"],
   inventory: [],
   employees: [], salaries: [], attendance: [], advances: [], salaryArchive: [],
+  productions: [],
+  receipts: [], expenses: [],
 };
 
 // ─── useAppData HOOK ──────────────────────────────────────────────────────────
@@ -82,6 +84,8 @@ function useAppData(userId) {
         categories: ["إلكترونيات","مواد خام","معدات","مستلزمات مكتبية","آلات","أغذية","ملابس","أدوات"],
         inventory: [],
         employees: [], salaries: [], attendance: [], advances: [], salaryArchive: [],
+        productions: [],
+        receipts: [], expenses: [],
       };
       rows.forEach(row => {
         const record = row.data;
@@ -116,6 +120,18 @@ function useAppData(userId) {
             if (idx >= 0) rebuilt.advances[idx] = record; else rebuilt.advances.push(record); break;
           }
           case "salary_archive": rebuilt.salaryArchive.push(record); break;
+          case "production": {
+            const idx = rebuilt.productions.findIndex(p => p.id === record.id);
+            if (idx >= 0) rebuilt.productions[idx] = record; else rebuilt.productions.push(record); break;
+          }
+          case "receipt": {
+            const idx = rebuilt.receipts.findIndex(r => r.id === record.id);
+            if (idx >= 0) rebuilt.receipts[idx] = record; else rebuilt.receipts.push(record); break;
+          }
+          case "expense": {
+            const idx = rebuilt.expenses.findIndex(e => e.id === record.id);
+            if (idx >= 0) rebuilt.expenses[idx] = record; else rebuilt.expenses.push(record); break;
+          }
           default: break;
         }
       });
@@ -128,15 +144,20 @@ function useAppData(userId) {
 
   // ─── Realtime: أي تغيير في بيانات الشركة (فواتير، عملاء، موردين، مخزون، موظفين...) ───
   // يوصل لكل المستخدمين المتصلين لحظيًا من غير ما يحتاجوا Refresh.
+  // بنأخّر إعادة الجلب شوية (Debounce) عشان منتسابقش مع التحديث المحلي الفوري
+  // اللي بيحصل لحظة إضافة/تعديل أي حاجة (عشان مايحصلش وميض أو اختفاء العنصر
+  // المضاف لسه).
   useEffect(() => {
     if (!userId) return;
+    let debounceTimer = null;
     const channel = supabase
       .channel(`records-changes-${userId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "records", filter: `user_id=eq.${userId}` }, () => {
-        loadData();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => { loadData(); }, 700);
       })
       .subscribe();
-    return () => { try { supabase.removeChannel(channel); } catch {} };
+    return () => { clearTimeout(debounceTimer); try { supabase.removeChannel(channel); } catch {} };
   }, [userId, loadData]);
 
   const ensureCategory = useCallback(async (rawName) => {
@@ -353,6 +374,58 @@ function useAppData(userId) {
     deleteSalaryArchive: async (id) => {
       await deleteRecord(id);
       setData(prev => ({ ...prev, salaryArchive: prev.salaryArchive.filter(a => a.id !== id) }));
+    },
+
+    // ── عمليات الإنتاج (Production Orders) — مسودة/معتمد ──
+    // ملحوظة: التأثير الفعلي على المخزون (خصم المواد الخام + إضافة المنتج +
+    // سجل المخزون + سجل النشاط) بيحصل من صفحة الإنتاج نفسها وقت الاعتماد
+    // (بتستخدم updateInventoryItem + logInventoryMovement + logActivity)،
+    // مش هنا — عشان دي مجرد حفظ/تحديث/حذف لسجل عملية الإنتاج ذاته.
+    addProduction: async (prod) => {
+      const record = { ...prod, type: "production" };
+      await saveData("production", record);
+      setData(prev => ({ ...prev, productions: [...prev.productions, record] }));
+    },
+    updateProduction: async (prod) => {
+      const record = { ...prod, type: "production" };
+      await saveData("production", record);
+      setData(prev => ({ ...prev, productions: prev.productions.map(p => p.id === prod.id ? record : p) }));
+    },
+    deleteProduction: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, productions: prev.productions.filter(p => p.id !== id) }));
+    },
+
+    // ── المقبوضات (Receipts) ──
+    addReceipt: async (rec) => {
+      const record = { ...rec, type: "receipt" };
+      await saveData("receipt", record);
+      setData(prev => ({ ...prev, receipts: [record, ...prev.receipts] }));
+    },
+    updateReceipt: async (rec) => {
+      const record = { ...rec, type: "receipt" };
+      await saveData("receipt", record);
+      setData(prev => ({ ...prev, receipts: prev.receipts.map(r => r.id === rec.id ? record : r) }));
+    },
+    deleteReceipt: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, receipts: prev.receipts.filter(r => r.id !== id) }));
+    },
+
+    // ── المصروفات (Expenses) ──
+    addExpense: async (exp) => {
+      const record = { ...exp, type: "expense" };
+      await saveData("expense", record);
+      setData(prev => ({ ...prev, expenses: [...prev.expenses, record] }));
+    },
+    updateExpense: async (exp) => {
+      const record = { ...exp, type: "expense" };
+      await saveData("expense", record);
+      setData(prev => ({ ...prev, expenses: prev.expenses.map(e => e.id === exp.id ? record : e) }));
+    },
+    deleteExpense: async (id) => {
+      await deleteRecord(id);
+      setData(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
     },
     // استرداد أرشيف: بترجع السجلات المحفوظة للقوائم النشطة وتمسح سجل الأرشيف
     restoreSalaryArchive: async (archiveId, salariesToRestore, attendanceToRestore, advancesToRestore) => {
@@ -852,53 +925,46 @@ function PasswordDialog({ userEmail, onConfirm, onCancel, title = "تأكيد ب
   );
 }
 
-// ─── جلسة واحدة بس لكل حساب (منع تسجيل الدخول من أكتر من جهاز) ───────────────
-// أي حساب (شركة أو موظف) يقدر يكون عنده جلسة واحدة نشطة بس. بنتابعها عن طريق
-// عمودين في جدول الحساب: active_session_id (معرّف الجلسة الحالية) و
-// active_session_at (آخر "نبضة" منها). لو جهاز جديد حاول يدخل والجلسة القديمة
-// لسه نشطة (نبضت خلال آخر 45 ثانية)، بيترفض الدخول الجديد فورًا.
-const SESSION_STALE_MS = 25000;
-
+// ─── جلسة واحدة بس للموظفين (Sub Users) — حساب الشركة نفسه مش خاضع لها ────────
+// حساب الشركة (profiles) يقدر يسجّل دخول من أي عدد أجهزة من غير أي تتبع جلسات
+// وبدون أي رسائل أو تسجيل خروج تلقائي بسبب جهاز تاني — عشان استقرار النظام.
+//
+// أما الموظفين (sub_users) فميزة "جهاز واحد بس" لسه شغالة، لكن بمنطق "استحواذ"
+// بسيط وموثوق بدل منطق "رفض لو الجلسة القديمة لسه نشطة": أي تسجيل دخول جديد
+// بنفس حساب الموظف بينجح فورًا ويكتب معرّف جلسة جديد على الصف، والجهاز القديم
+// بيكتشف إن معرّف الجلسة اتغيّر (عن طريق Realtime وكـ fallback عن طريق نبضة كل
+// 10 ثواني) ويتم تسجيل خروجه فورًا برسالة واضحة. مفيش مفهوم "جلسة قديمة عالقة"
+// خالص في المنطق ده — أي دخول جديد بيكتب فوق القديم مباشرة.
 const generateSessionId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-// يحاول الجهاز يستحوذ على الجلسة. بيرجع { allowed, sessionId }
-// existingSessionId (اختياري): لو الجهاز ده أصلاً صاحب الجلسة الحالية (مثلاً
-// الموظف عمل تحديث للصفحة)، منمنعوش من الدخول تاني بنفس جلسته.
-const claimSession = async (table, id, existingSessionId) => {
+// يسجّل جلسة جديدة للموظف (يستخدم فقط مع جدول sub_users). بيرجع دايمًا
+// { allowed: true, sessionId } — مفيش رفض؛ أي دخول جديد بياخد الجلسة فورًا.
+const claimSession = async (table, id) => {
+  const sessionId = generateSessionId();
   try {
-    const { data } = await supabase.from(table).select("active_session_id, active_session_at").eq("id", id).single();
-    const lastBeat = data?.active_session_at ? new Date(data.active_session_at).getTime() : 0;
-    const isStale = !data?.active_session_id || (Date.now() - lastBeat > SESSION_STALE_MS);
-    const isSameSession = existingSessionId && data?.active_session_id === existingSessionId;
-    if (!isStale && !isSameSession) {
-      // في جهاز تاني شغال دلوقتي بالحساب ده — نرفض ونبلغه إن حد حاول يدخل
-      await supabase.from(table).update({ login_attempt_at: new Date().toISOString() }).eq("id", id);
-      return { allowed: false, sessionId: null };
-    }
-    const sessionId = isSameSession ? existingSessionId : generateSessionId();
     await supabase.from(table).update({ active_session_id: sessionId, active_session_at: new Date().toISOString() }).eq("id", id);
-    return { allowed: true, sessionId };
-  } catch {
-    // لو الأعمدة مش موجودة لسه أو حصل أي خطأ، منمنعش المستخدم من الدخول
-    return { allowed: true, sessionId: existingSessionId || generateSessionId() };
-  }
+  } catch { /* لو الأعمدة مش موجودة لسه أو حصل خطأ، منمنعش المستخدم من الدخول */ }
+  return { allowed: true, sessionId };
 };
 
-// نبضة دورية: بتأكد إن الجلسة لسه بتاعتنا، وترجع لو حد حاول يدخل من جهاز تاني
+// نبضة دورية (fallback على الـ Realtime): بتتأكد إن الجلسة لسه بتاعتنا.
+// لو معرّف الجلسة على السيرفر اتغيّر لحاجة تانية (يعني حد دخل من جهاز تاني)،
+// بترجع stillValid:false عشان الجهاز ده يتسجل خروجه فورًا.
 const heartbeatSession = async (table, id, sessionId) => {
   try {
-    const { data } = await supabase.from(table).select("active_session_id, login_attempt_at").eq("id", id).single();
+    const { data } = await supabase.from(table).select("active_session_id").eq("id", id).single();
     if (data?.active_session_id && data.active_session_id !== sessionId) {
-      return { stillValid: false, loginAttemptAt: null };
+      return { stillValid: false };
     }
     await supabase.from(table).update({ active_session_at: new Date().toISOString() }).eq("id", id);
-    return { stillValid: true, loginAttemptAt: data?.login_attempt_at || null };
+    return { stillValid: true };
   } catch {
-    return { stillValid: true, loginAttemptAt: null };
+    return { stillValid: true };
   }
 };
 
-// تحرير الجلسة عند تسجيل الخروج — بس لو لسه هي جلستنا (حماية من تعارض التوقيت)
+// تحرير الجلسة عند تسجيل الخروج — بس لو لسه هي جلستنا (حماية من تعارض التوقيت).
+// كده أي "جلسة معلقة" بتتصفر فورًا لحظة الخروج الصريح، ومفيش أي بقايا.
 const releaseSession = (table, id, sessionId) => {
   try { supabase.from(table).update({ active_session_id: null, active_session_at: null }).eq("id", id).eq("active_session_id", sessionId).then(()=>{}); } catch {}
 };
@@ -1327,13 +1393,14 @@ const Sel = ({ label, value, onChange, options, placeholder="-- اختر --" }) 
 const Modal = ({ title, onClose, children, wide=false }) => {
   const isMobile = useIsMobile();
   return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:isMobile?"flex-end":"center",justifyContent:"center",zIndex:1000,padding:isMobile?0:16 }}>
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:isMobile?12:16 }}>
       <div style={{
         background:C.surface,border:`1px solid ${C.borderLight}`,
-        borderRadius:isMobile?"18px 18px 0 0":20,
+        borderRadius:isMobile?16:20,
         padding:isMobile?18:28,
         width:isMobile?"100%":(wide?"min(780px,95vw)":"min(540px,95vw)"),
-        maxHeight:isMobile?"92vh":"90vh", overflowY:"auto",
+        maxWidth:isMobile?"96vw":undefined,
+        maxHeight:isMobile?"88vh":"90vh", overflowY:"auto",
         scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,
         boxShadow:`0 30px 80px rgba(0,0,0,0.7)`,
         boxSizing:"border-box",
