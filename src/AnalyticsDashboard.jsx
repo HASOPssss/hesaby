@@ -12,19 +12,25 @@ import {
 // تغيير (إضافة/تعديل/حذف فاتورة، صنف، موظف...إلخ) — لأن useAppData نفسها
 // مشتركة في قناة Realtime على جدول records، فمفيش استعلامات إضافية هنا خالص.
 //
-// ⚠️ ملحوظتين مهمتين بخصوص اكتمال البيانات (لازم تتراجع بعد ما تشوف باقي
-// ملفات المشروع اللي مكنتش متاحة لي وقت الكتابة):
+// ⚠️ ملحوظة مهمة بخصوص اكتمال البيانات (لازم تتراجع بعد ما تشوف باقي ملفات
+// المشروع اللي مكنتش متاحة لي وقت الكتابة):
 //
-// 1) "الفواتير الضريبية" (taxinvoices/taxreports) مفيش أي مصدر بيانات ليها
-//    وصلني، فقسم الضرائب مش موجود في النسخة دي بدل ما أخترع أرقام غلط.
-// 2) "أكثر/أقل المنتجات مبيعًا" و"حركة المخزون" التفصيلية محتاجة بنود
-//    (line items) جوه فواتير المبيعات (data.salesInvoices[].items) وسجل
-//    حركة مخزون. لو الفواتير عندك فيها مصفوفة items فعلاً، الكارت هيشتغل
-//    تلقائي (فيه فحص دفاعي)، ولو لأ هيظهر رسالة واضحة بدل رقم وهمي.
+// "أكثر/أقل المنتجات مبيعًا" و"حركة المخزون" التفصيلية محتاجة بنود
+// (line items) جوه فواتير المبيعات (data.salesInvoices[].items) وسجل
+// حركة مخزون. لو الفواتير عندك فيها مصفوفة items فعلاً، الكارت هيشتغل
+// تلقائي (فيه فحص دفاعي)، ولو لأ هيظهر رسالة واضحة بدل رقم وهمي.
 //
 // المقبوضات والمصروفات بقت جزء من نفس نظام records المركزي (زي الإنتاج)،
 // فكل الأرقام في الصفحة دي — بما فيها الإيرادات والمصروفات — لحظية 100%
 // ومشتركة عبر كل الأجهزة، مش محلية على متصفح واحد زي ما كانت قبل كده.
+//
+// قسم "الضرائب": نفس منطق TaxInvoicesPage/TaxReportsPage بالظبط — "الفاتورة
+// الضريبية" مش جدول منفصل، هي أي صنف من data.salesInvoices معاه taxAmount>0.
+// فالأرقام هنا (ضريبة محصّلة/مستحقة) لحظية 100% زي باقي اللوحة، لأنها طالعة
+// من نفس data.salesInvoices. القواعد الضريبية المخصصة (نسبة أرباح/رسوم ثابتة
+// شهرية...إلخ) لسه مخزّنة في localStorage جوه TaxReportsPage نفسها (زي ما
+// كانت المقبوضات والمصروفات قبل كده) فمش داخلة في الحسابات هنا — لو حبيت
+// أنقلها لنفس نظام records وأضيفها هنا كمان قولّي.
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ─── فترات زمنية جاهزة ─────────────────────────────────────────────────────────
@@ -187,10 +193,10 @@ function EmptyChart({ small }) {
 const DEFAULT_ORDER = [
   "total_sales","total_purchases","net_profit","total_revenue","total_expenses",
   "total_debts","total_collected","invoice_count","clients_count","suppliers_count",
-  "items_count","employees_count",
+  "items_count","employees_count","tax_collected","tax_due",
   "sales_by_period","purchases_by_period","revenue_vs_expenses","profit_over_time",
   "invoice_status","top_clients","top_suppliers","expense_by_category",
-  "inventory_health","top_products","employees_finance",
+  "inventory_health","top_products","employees_finance","tax_by_period",
 ];
 
 function AnalyticsDashboard({ data, security, allowedPages, setPage }) {
@@ -308,6 +314,17 @@ function AnalyticsDashboard({ data, security, allowedPages, setPage }) {
     ].filter(d => d.value > 0);
   }, [salesInRange]);
 
+  // ── الضرائب: نفس منطق TaxInvoicesPage — أي فاتورة مبيعات معاها taxAmount>0 ──
+  const taxInvoicesInRange = useMemo(() => salesInRange.filter(i => (i.taxAmount || 0) > 0), [salesInRange]);
+  const totalTaxAmount = taxInvoicesInRange.reduce((s, i) => s + (i.taxAmount || 0), 0);
+  // الضريبة "المحصّلة" بنسبة ما تحصّل فعليًا من كل فاتورة، والباقي "مستحق"
+  const totalTaxCollected = taxInvoicesInRange.reduce((s, i) => {
+    const ratio = (i.amount || 0) > 0 ? Math.min(1, (i.paid || 0) / i.amount) : 0;
+    return s + (i.taxAmount || 0) * ratio;
+  }, 0);
+  const totalTaxDue = Math.max(0, totalTaxAmount - totalTaxCollected);
+  const taxByPeriod = useMemo(() => bucketByDate(taxInvoicesInRange, "date", from, to, i => i.taxAmount || 0), [taxInvoicesInRange, from, to]);
+
   // أكثر/أقل المنتجات مبيعًا — يعتمد على وجود بند items داخل فاتورة البيع
   const productSales = useMemo(() => {
     const map = new Map();
@@ -383,6 +400,10 @@ function AnalyticsDashboard({ data, security, allowedPages, setPage }) {
       <ClickableStat label="عدد الأصناف" value={fmtNum(inventory.length)} color={C.purple} icon={I.box} onClick={() => goto("inventoryitems")} />) },
     employees_count: { requiredPage: "employees", size: 1, render: () => (
       <ClickableStat label="عدد الموظفين" value={fmtNum(employees.length)} color={C.cyan} icon={I.people} onClick={() => goto("employees")} />) },
+    tax_collected: { requiredPage: "taxinvoices", size: 1, render: () => (
+      <ClickableStat label="ضريبة القيمة المضافة المحصّلة" value={fmt(totalTaxCollected)} color={C.green} icon={I.tax} onClick={() => goto("taxinvoices")} />) },
+    tax_due: { requiredPage: "taxinvoices", size: 1, render: () => (
+      <ClickableStat label="ضريبة القيمة المضافة المستحقة" value={fmt(totalTaxDue)} color={C.yellow} icon={I.tax} onClick={() => goto("taxinvoices")} sub={`${fmtNum(taxInvoicesInRange.length)} فاتورة ضريبية`} />) },
 
     sales_by_period: { requiredPage: "sales", size: 2, title: "المبيعات خلال الفترة", render: () => <BarChart data={bucketByDate(salesInRange, "date", from, to, s => s.amount || 0)} color={C.green} /> },
     purchases_by_period: { requiredPage: "purchases", size: 2, title: "المشتريات خلال الفترة", render: () => <BarChart data={bucketByDate(purchasesInRange, "date", from, to, p => p.amount || 0)} color={C.red} /> },
@@ -411,6 +432,7 @@ function AnalyticsDashboard({ data, security, allowedPages, setPage }) {
         <MiniStat label="إجمالي الخصومات" value={fmt(totalDeductions)} color={C.red} icon={I.alert} />
       </div>
     ) },
+    tax_by_period: { requiredPage: "taxinvoices", size: 2, title: "ملخص ضريبة القيمة المضافة حسب الفترة", render: () => <BarChart data={taxByPeriod} color={C.yellow} /> },
   };
 
   const visibleOrder = order.filter(id => widgets[id] && canSee(widgets[id].requiredPage) && !hidden.has(id));
@@ -428,6 +450,7 @@ function AnalyticsDashboard({ data, security, allowedPages, setPage }) {
       ["إجمالي المبالغ المحصلة", fmt(totalCollected)], ["عدد الفواتير", fmtNum(invoiceCount)],
       ["عدد العملاء", fmtNum(clients.length)], ["عدد الموردين", fmtNum(suppliers.length)],
       ["عدد الأصناف", fmtNum(inventory.length)], ["عدد الموظفين", fmtNum(employees.length)],
+      ["ضريبة القيمة المضافة المحصّلة", fmt(totalTaxCollected)], ["ضريبة القيمة المضافة المستحقة", fmt(totalTaxDue)],
     ];
     const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>ملخص لوحة الإحصائيات</title>
     <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Cairo','Segoe UI',sans-serif;background:#fff;color:#1a1a2e;padding:40px}
@@ -456,6 +479,7 @@ function AnalyticsDashboard({ data, security, allowedPages, setPage }) {
       ["إجمالي المبالغ المحصلة", totalCollected], ["عدد الفواتير", invoiceCount],
       ["عدد العملاء", clients.length], ["عدد الموردين", suppliers.length],
       ["عدد الأصناف", inventory.length], ["عدد الموظفين", employees.length],
+      ["ضريبة القيمة المضافة المحصّلة", totalTaxCollected], ["ضريبة القيمة المضافة المستحقة", totalTaxDue],
     ].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -566,6 +590,7 @@ const WIDGET_LABELS = {
   total_revenue: "إجمالي الإيرادات", total_expenses: "إجمالي المصروفات", total_debts: "إجمالي الديون",
   total_collected: "إجمالي المحصّل", invoice_count: "عدد الفواتير", clients_count: "عدد العملاء",
   suppliers_count: "عدد الموردين", items_count: "عدد الأصناف", employees_count: "عدد الموظفين",
+  tax_collected: "ضريبة القيمة المضافة المحصّلة", tax_due: "ضريبة القيمة المضافة المستحقة",
 };
 
 function ClickableStat({ label, value, color, icon, onClick, sub }) {

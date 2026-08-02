@@ -22,10 +22,16 @@ import {
 //   - بعد الاعتماد: العملية تتقفل تمامًا (لا تعديل ولا حذف)، وأي تصحيح
 //     لازم يتم بعملية إنتاج جديدة منفصلة (زرار "تصحيح" بينسخ نفس المنتج).
 //
-// ملحوظة مهمة: القسم الخاص بـ "نوع الصنف" (مادة خام / منتج نهائي / خدمة)
-// و"تركيبة المنتج (BOM)" بيتحطوا داخل صفحة إضافة/تعديل الصنف نفسها، مش هنا.
-// شوف ملف ItemTypeAndBOM.jsx المرفق — فيه المكوّن الجاهز اللي تضيفه هناك،
-// وهو اللي بيكتب item.itemType و item.bom اللي الصفحة دي بتقرأ منها.
+// ملحوظة مهمة: إدارة تركيبة المنتج (BOM) بقت بالكامل جوه الصفحة دي — قسم
+// "إدارة تركيبات المنتجات (BOM)" تحت. مش كل صنف في المخزون منتج بيتصنّع،
+// فمفيش أي تركيبة بتتحط من صفحة الأصناف نفسها. أي صنف (بغض النظر عن نوعه)
+// ممكن يتحط له تركيبة من هنا، وبمجرد ما تتحفظ، اختياره في "أمر إنتاج جديد"
+// بيحمّل مواده الخام تلقائيًا. تعديل أو حذف تركيبة محفوظة محميين بالـ
+// Passcode ومسجّلين في سجل النشاط؛ إضافة تركيبة جديدة لصنف ملوش تركيبة أصلاً
+// مش محتاجة Passcode (زي باقي عمليات "الإضافة" في النظام).
+//
+// (ملف ItemTypeAndBOM.jsx القديم بقى بس فيه اختيار "نوع الصنف" — قسم الـ BOM
+// اتشال منه لأنه بقى هنا.)
 //
 // الصفحة دي بتستقبل prop اختياري اسمه security (زي باقي صفحات النظام
 // اللي بتستخدم usePasscodeGate) — لازم يكون فيه { ownerId, userLabel,
@@ -146,11 +152,20 @@ function ProductionCostPage({ data, actions, security }) {
   const [statusFilter, setStatusFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
 
+  // ── إدارة تركيبات المنتجات (BOM) ──
+  const [bomManagerOpen, setBomManagerOpen] = useState(false);
+  const [bomView, setBomView] = useState("list"); // "list" | "form"
+  const [bomEditItemId, setBomEditItemId] = useState(null); // id الصنف اللي بنعدّل تركيبته، null = تركيبة جديدة
+  const [bomTargetId, setBomTargetId] = useState(""); // الصنف المختار في الفورم
+  const [bomEditorLines, setBomEditorLines] = useState([]); // [{materialId, materialName, qtyPerUnit, unit}]
+  const [newBomMaterialId, setNewBomMaterialId] = useState("");
+
   const { requestPasscode, PasscodeGate, log } = usePasscodeGate(security);
 
   const productions = data?.productions || [];
   const inventory = data?.inventory || [];
-  const finishedProducts = inventory.filter(i => i.itemType === "finished");
+  const itemsWithBom = inventory.filter(i => Array.isArray(i.bom) && i.bom.length > 0);
+  const itemsWithoutBom = inventory.filter(i => !Array.isArray(i.bom) || i.bom.length === 0);
 
   const userName = security?.userLabel || "مستخدم";
 
@@ -376,6 +391,90 @@ function ProductionCostPage({ data, actions, security }) {
     setConfirmDeleteId(null);
   };
 
+  // ── إدارة تركيبات المنتجات (BOM) ──
+  const resetBomForm = () => {
+    setBomEditItemId(null);
+    setBomTargetId("");
+    setBomEditorLines([]);
+    setNewBomMaterialId("");
+    setBomView("list");
+  };
+
+  const openBomManager = () => { resetBomForm(); setBomManagerOpen(true); };
+  const closeBomManager = () => { setBomManagerOpen(false); resetBomForm(); };
+
+  // إضافة تركيبة جديدة لصنف ملوش تركيبة أصلاً — مش عملية حساسة، زي أي "إضافة" تانية
+  const openNewBom = () => {
+    setBomEditItemId(null);
+    setBomTargetId("");
+    setBomEditorLines([]);
+    setNewBomMaterialId("");
+    setBomView("form");
+  };
+
+  // تعديل تركيبة محفوظة — عملية حساسة: محمية بالـ Passcode
+  const openEditBomClick = (item) => {
+    requestPasscode({
+      pageId: "production", kind: "edit",
+      label: `تعديل تركيبة "${item.name}"`,
+      onConfirm: () => {
+        setBomEditItemId(item.id);
+        setBomTargetId(item.id);
+        setBomEditorLines((item.bom || []).map(b => ({ ...b })));
+        setBomView("form");
+      },
+    });
+  };
+
+  const selectBomTarget = (id) => { setBomTargetId(id); setBomEditorLines([]); };
+
+  const addBomMaterialLine = () => {
+    if (!newBomMaterialId) return;
+    if (bomEditorLines.some(l => l.materialId === newBomMaterialId)) return; // منع تكرار نفس المادة
+    const material = inventory.find(i => i.id === newBomMaterialId);
+    setBomEditorLines(l => [...l, { materialId: newBomMaterialId, materialName: material?.name || "", unit: material?.unit || "قطعة", qtyPerUnit: 1 }]);
+    setNewBomMaterialId("");
+  };
+
+  const updateBomMaterialQty = (idx, val) => {
+    setBomEditorLines(l => l.map((x, i) => i === idx ? { ...x, qtyPerUnit: parseFloat(val) || 0 } : x));
+  };
+
+  const removeBomMaterialLine = (idx) => setBomEditorLines(l => l.filter((_, i) => i !== idx));
+
+  const handleSaveBom = async () => {
+    if (!bomTargetId) { showPermissionToast("اختر الصنف أولاً", "warning"); return; }
+    if (bomEditorLines.length === 0) { showPermissionToast("أضف مادة خام واحدة على الأقل", "warning"); return; }
+    const item = inventory.find(i => i.id === bomTargetId);
+    if (!item) return;
+    const before = item.bom || [];
+    await actions.updateInventoryItem({ ...item, bom: bomEditorLines });
+    if (bomEditItemId && security) {
+      log({
+        actionType: "تعديل تركيبة (BOM)", section: "تكلفة الإنتاج", target: item.name,
+        before: { bom: before }, after: { bom: bomEditorLines },
+      });
+    }
+    showPermissionToast(bomEditItemId ? "تم تعديل التركيبة" : "تم حفظ التركيبة", "success");
+    resetBomForm();
+  };
+
+  // حذف تركيبة محفوظة — عملية حساسة: محمية بالـ Passcode ومسجّلة في سجل النشاط
+  const handleDeleteBomClick = (item) => {
+    requestPasscode({
+      pageId: "production", kind: "delete",
+      label: `حذف تركيبة "${item.name}"`,
+      onConfirm: async () => {
+        const before = item.bom || [];
+        await actions.updateInventoryItem({ ...item, bom: [] });
+        if (security) {
+          log({ actionType: "حذف تركيبة (BOM)", section: "تكلفة الإنتاج", target: item.name, before: { bom: before }, after: { bom: [] } });
+        }
+        showPermissionToast("تم حذف التركيبة", "success");
+      },
+    });
+  };
+
   // ── الفلترة والبحث ──
   const filtered = useMemo(() => productions
     .filter(p => !statusFilter || p.status === statusFilter)
@@ -392,7 +491,12 @@ function ProductionCostPage({ data, actions, security }) {
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
       <PageHeader title="تكلفة الإنتاج" icon={I.chartBar} subtitle={`${productions.length} عملية إنتاج (${draftCount} مسودة، ${completedCount} معتمد)`}
-        action={<Btn onClick={openNew}><Ic d={I.plus} s={14} />أمر إنتاج جديد</Btn>} />
+        action={
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            <Btn variant="ghost" onClick={openBomManager}><Ic d={I.box} s={14} />إدارة تركيبات المنتجات (BOM)</Btn>
+            <Btn onClick={openNew}><Ic d={I.plus} s={14} />أمر إنتاج جديد</Btn>
+          </div>
+        } />
 
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
         <MiniStat label="إجمالي تكاليف الإنتاج" value={fmt(totalAllCost)} color={C.red} icon={I.revenue} />
@@ -412,7 +516,7 @@ function ProductionCostPage({ data, actions, security }) {
           </div>
           <div style={{ width:200 }}>
             <Sel label="المنتج" value={productFilter} onChange={setProductFilter}
-              options={finishedProducts.map(p=>({value:p.id,label:p.name}))} placeholder="كل المنتجات" />
+              options={itemsWithBom.map(p=>({value:p.id,label:p.name}))} placeholder="كل المنتجات" />
           </div>
           <div style={{ display:"flex",alignItems:"flex-end",gap:8 }}>
             <Btn variant="ghost" small onClick={()=>printProductionLog(filtered)}><Ic d={I.print} s={13} />طباعة</Btn>
@@ -467,13 +571,13 @@ function ProductionCostPage({ data, actions, security }) {
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12 }}>
               <DatePicker label="التاريخ" value={form.date} onChange={v=>setForm({...form,date:v})} />
               <Sel label="المنتج النهائي" value={form.productId} onChange={selectProduct}
-                options={finishedProducts.map(p=>({value:p.id,label:p.name}))} placeholder="اختر منتج نهائي" />
+                options={itemsWithBom.map(p=>({value:p.id,label:p.name}))} placeholder="اختر صنف له تركيبة" />
               <Inp label="الكمية المطلوب إنتاجها" type="number" value={form.quantity} onChange={changeQuantity} />
             </div>
 
             {!form.productId && (
               <div style={{ background:C.surface2,borderRadius:10,padding:14,fontSize:12,color:C.textMuted,textAlign:"center" }}>
-                اختر منتجًا نهائيًا له تركيبة (BOM) محفوظة من صفحة الأصناف عشان تتحمّل المواد الخام تلقائيًا.
+                اختر صنفًا له تركيبة (BOM) محفوظة عشان تتحمّل المواد الخام تلقائيًا. لو الصنف اللي محتاجه مش في القائمة، أضِف تركيبته الأول من "إدارة تركيبات المنتجات (BOM)" فوق.
               </div>
             )}
 
@@ -484,7 +588,7 @@ function ProductionCostPage({ data, actions, security }) {
                 </div>
                 {bomLines.length === 0 ? (
                   <div style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:14,fontSize:12,color:C.red }}>
-                    هذا المنتج ليس له تركيبة (BOM) محفوظة بعد. أضِف المواد الخام من صفحة الصنف أولاً.
+                    هذا الصنف ليس له تركيبة (BOM) محفوظة بعد. أضِفها من "إدارة تركيبات المنتجات (BOM)" فوق.
                   </div>
                 ) : (
                   <div style={{ background:C.surface2,borderRadius:12,overflowX:"auto",border:`1px solid ${C.border}`,WebkitOverflowScrolling:"touch" }}>
@@ -565,6 +669,119 @@ function ProductionCostPage({ data, actions, security }) {
           onConfirm={confirmDelete}
           onCancel={()=>setConfirmDeleteId(null)}
         />
+      )}
+
+      {bomManagerOpen && (
+        <Modal title="إدارة تركيبات المنتجات (BOM)" onClose={closeBomManager} wide>
+          {bomView === "list" ? (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <p style={{ margin:0, fontSize:12, color:C.textMuted, lineHeight:1.8 }}>
+                  اختر أي صنف وحدّد المواد الخام والكميات المطلوبة لإنتاج وحدة واحدة منه. بمجرد الحفظ، هتقدر تختاره في "أمر إنتاج جديد" وهيحمّل مواده تلقائيًا.
+                </p>
+                <Btn small onClick={openNewBom}><Ic d={I.plus} s={13} />تركيبة جديدة</Btn>
+              </div>
+              {itemsWithBom.length === 0 ? (
+                <div style={{ background:C.surface2, borderRadius:12, padding:30, textAlign:"center", color:C.textMuted, fontSize:13 }}>
+                  لا توجد أي تركيبات محفوظة بعد. اضغط "تركيبة جديدة" للبدء.
+                </div>
+              ) : (
+                <div style={{ background:C.surface2, borderRadius:12, overflowX:"auto", border:`1px solid ${C.border}` }}>
+                  <table style={{ width:"100%", minWidth:520, borderCollapse:"collapse" }}>
+                    <THead cols={["الصنف", "عدد المواد", "تكلفة المواد (بالسعر الحالي)", ""]} />
+                    <tbody>
+                      {itemsWithBom.map((item, i) => {
+                        const cost = (item.bom || []).reduce((s, b) => {
+                          const mat = inventory.find(x => x.id === b.materialId);
+                          return s + (parseFloat(b.qtyPerUnit) || 0) * (mat?.cost || 0);
+                        }, 0);
+                        return (
+                          <TRow key={item.id} alt={i % 2}>
+                            <TD><span style={{ fontWeight:700 }}>{item.name}</span></TD>
+                            <TD mono color={C.textDim}>{item.bom.length}</TD>
+                            <TD mono color={C.accent}>{fmt(cost)}</TD>
+                            <td style={{ padding:"8px 14px" }}>
+                              <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+                                <button title="تعديل" onClick={()=>openEditBomClick(item)} style={{ background:"none", border:"none", cursor:"pointer", color:C.blue }}><Ic d={I.edit} s={14} /></button>
+                                <button title="حذف" onClick={()=>handleDeleteBomClick(item)} style={{ background:"none", border:"none", cursor:"pointer", color:C.red }}><Ic d={I.trash} s={14} /></button>
+                              </div>
+                            </td>
+                          </TRow>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div style={{ display:"flex", justifyContent:"flex-end" }}>
+                <Btn variant="ghost" onClick={closeBomManager}>إغلاق</Btn>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              {bomEditItemId ? (
+                <div>
+                  <div style={{ fontSize:11, color:C.textMuted, fontWeight:600, marginBottom:6 }}>الصنف</div>
+                  <div style={{ background:C.surface2, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 14px", fontSize:14, fontWeight:700, color:C.text }}>
+                    {inventory.find(i => i.id === bomTargetId)?.name || "—"}
+                  </div>
+                </div>
+              ) : (
+                <Sel label="الصنف" value={bomTargetId} onChange={selectBomTarget}
+                  options={itemsWithoutBom.map(i => ({ value:i.id, label:i.name }))}
+                  placeholder="اختر الصنف اللي عايز تحط له تركيبة" />
+              )}
+
+              {bomTargetId && (
+                <div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <label style={{ fontSize:13, fontWeight:600, color:C.textDim }}>المواد الخام والكميات (لإنتاج وحدة واحدة)</label>
+                  </div>
+                  <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                    <div style={{ flex:1 }}>
+                      <Sel value={newBomMaterialId} onChange={setNewBomMaterialId}
+                        options={inventory.filter(i => i.id !== bomTargetId && !bomEditorLines.some(l => l.materialId === i.id)).map(i => ({ value:i.id, label:i.name }))}
+                        placeholder="اختر مادة خام لإضافتها" />
+                    </div>
+                    <Btn small onClick={addBomMaterialLine}><Ic d={I.plus} s={12} />إضافة</Btn>
+                  </div>
+
+                  {bomEditorLines.length === 0 ? (
+                    <div style={{ background:C.surface2, borderRadius:10, padding:14, fontSize:12, color:C.textMuted, textAlign:"center" }}>
+                      لسه مفيش مواد خام مضافة للتركيبة دي.
+                    </div>
+                  ) : (
+                    <div style={{ background:C.surface2, borderRadius:12, overflowX:"auto", border:`1px solid ${C.border}` }}>
+                      <table style={{ width:"100%", minWidth:420, borderCollapse:"collapse" }}>
+                        <THead cols={["المادة الخام", "الكمية لإنتاج وحدة واحدة", "الوحدة", ""]} />
+                        <tbody>
+                          {bomEditorLines.map((l, i) => (
+                            <TRow key={l.materialId} alt={i % 2}>
+                              <TD>{l.materialName}</TD>
+                              <td style={{ padding:"6px 10px" }}>
+                                <input type="number" value={l.qtyPerUnit} onChange={e=>updateBomMaterialQty(i, e.target.value)}
+                                  style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 8px", color:C.text, fontSize:12, fontFamily:"inherit", width:90 }} />
+                              </td>
+                              <TD color={C.textDim}>{l.unit}</TD>
+                              <td style={{ padding:"6px 10px" }}>
+                                <button onClick={()=>removeBomMaterialLine(i)} style={{ background:"none", border:"none", cursor:"pointer", color:C.red }}><Ic d={I.trash} s={14} /></button>
+                              </td>
+                            </TRow>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+                <Btn variant="ghost" onClick={()=>setBomView("list")}>رجوع</Btn>
+                <Btn onClick={handleSaveBom}>{bomEditItemId ? "حفظ التعديلات" : "حفظ التركيبة"}</Btn>
+              </div>
+            </div>
+          )}
+        </Modal>
       )}
 
       {PasscodeGate}
