@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import {
   C, Ic, I, fmt, fmtNum, fmtDateTime, today, nowISO,
   Card, MiniStat, Btn, DatePicker, Inp, Sel, Modal, ConfirmDialog,
   THead, TRow, TD, PageHeader, openPrint, getCompanyBranding,
-  logInventoryMovement, usePasscodeGate, showPermissionToast,
+  logInventoryMovement, usePasscodeGate, showPermissionToast, usePageShortcuts,
 } from "./shared";
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -488,6 +488,13 @@ function ProductionCostPage({ data, actions, security }) {
   const completedCount = productions.filter(p=>p.status==="completed").length;
   const draftCount = productions.filter(p=>p.status==="draft").length;
 
+  const searchRef = useRef(null);
+  usePageShortcuts("تكلفة الإنتاج", [
+    { combo:"ctrl+n", label:"أمر إنتاج جديد", description:"يفتح نموذج إنشاء أمر إنتاج جديد", enabled:!showModal && !bomManagerOpen, handler:openNew },
+    { combo:"ctrl+f", label:"البحث في عمليات الإنتاج", description:"يركّز على مربع البحث برقم العملية أو اسم المنتج", enabled:!showModal && !bomManagerOpen, handler:()=>searchRef.current?.focus() },
+    { combo:"ctrl+s", label:"حفظ كمسودة", description:"يحفظ أمر الإنتاج المفتوح حاليًا كمسودة", enabled:showModal, handler:handleSaveDraft },
+  ]);
+
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
       <PageHeader title="تكلفة الإنتاج" icon={I.chartBar} subtitle={`${productions.length} عملية إنتاج (${draftCount} مسودة، ${completedCount} معتمد)`}
@@ -508,7 +515,7 @@ function ProductionCostPage({ data, actions, security }) {
       <Card style={{ padding:0 }}>
         <div style={{ display:"flex",gap:10,flexWrap:"wrap",padding:16,borderBottom:`1px solid ${C.border}` }}>
           <div style={{ flex:"1 1 200px" }}>
-            <Inp label="بحث" value={search} onChange={setSearch} placeholder="رقم العملية أو اسم المنتج..." />
+            <Inp ref={searchRef} label="بحث" value={search} onChange={setSearch} placeholder="رقم العملية أو اسم المنتج..." />
           </div>
           <div style={{ width:180 }}>
             <Sel label="الحالة" value={statusFilter} onChange={setStatusFilter}

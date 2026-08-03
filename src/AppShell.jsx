@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { C, Ic, I, Logo, useTheme, useIsMobile, PermissionToastProvider } from "./shared";
+import { C, Ic, I, Logo, useTheme, useIsMobile, PermissionToastProvider, useOpenShortcutsHelp } from "./shared";
 import { Dashboard, AccountStatement, InventoryPage, InventoryItemsPage, CategoriesPage, CompanySettingsPage, ReceiptsPage, ExpensesPage } from "./Pages";
 import InvoicesPage from "./InvoicesPage";
 import UnifiedReportsPage from "./UnifiedReportsPage";
@@ -25,6 +25,7 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const W = isMobile ? Math.min(280, Math.round(window.innerWidth*0.82)) : (sidebarCollapsed ? 68 : 230);
   const [theme, setThemeState] = useTheme();
+  const openShortcutsHelp = useOpenShortcutsHelp();
   // Get company name for sidebar display
   const sidebarCompanyName = (() => { try { return sessionStorage.getItem("company_display_name") || "حسابي Pro"; } catch { return "حسابي Pro"; } })();
 
@@ -192,6 +193,12 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
           }}>
             <Ic d={I.logout} s={14} c={C.red} />
             {!collapsed && "تسجيل الخروج"}
+          </button>
+          {/* اختصارات لوحة المفاتيح */}
+          <button onClick={openShortcutsHelp} title={collapsed?"اختصارات لوحة المفاتيح (Ctrl + /)":""}
+            style={{ marginTop:6, width:"100%",display:"flex",alignItems:"center",gap:collapsed?0:8, padding:collapsed?"9px 0":(isMobile?"12px 12px":"9px 12px"),borderRadius:10,border:`1px solid ${C.border}`, cursor:"pointer",fontFamily:"inherit",fontSize:isMobile?13:12,fontWeight:600, background:C.surface2,color:C.textDim,transition:"all 0.2s",justifyContent:collapsed?"center":"flex-start" }}>
+            <Ic d={I.keyboard} s={14} c={C.textDim} />
+            {!collapsed && <span style={{ display:"flex",alignItems:"center",gap:6,flex:1 }}>اختصارات لوحة المفاتيح <kbd style={{ marginRight:"auto",fontSize:9,fontFamily:"monospace",color:C.textMuted,background:C.surface3,border:`1px solid ${C.border}`,borderRadius:4,padding:"1px 5px" }}>Ctrl+/</kbd></span>}
           </button>
           {/* Theme toggle */}
           <button onClick={()=>{ const t = theme==="dark"?"light":"dark"; setThemeState(t); }}

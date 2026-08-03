@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   supabase, normalizeArabic, C, Ic, I, fmt, fmtNum, today, useIsMobile,
   printStocktakeReport, printStocktakeUpdateReport, downloadInventoryTemplate, parseInventoryCSV,
   ConfirmDialog, usePasscodeGate, setCachedPasscode, logActivity, Badge, Card, GlowCard, MiniStat, Btn,
-  DatePicker, MonthPicker, Inp, Sel, Modal, THead, TRow, TD, PageHeader,
+  DatePicker, MonthPicker, Inp, Sel, Modal, THead, TRow, TD, PageHeader, usePageShortcuts,
 } from "./shared";
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -267,6 +267,11 @@ function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, 
 function InventoryItemsPage({ inventory, categories }) {
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
+  const searchRef = useRef(null);
+
+  usePageShortcuts("المخزون كأصناف", [
+    { combo:"ctrl+f", label:"البحث في الأصناف", description:"يركّز على مربع البحث بالاسم أو الفئة", handler:()=>searchRef.current?.focus() },
+  ]);
 
   const filtered = inventory.filter(p=>{
     const matchSearch = p.name?.includes(search)||p.id?.includes(search)||p.category?.includes(search);
@@ -316,7 +321,7 @@ function InventoryItemsPage({ inventory, categories }) {
       </Card>
       <Card style={{ padding:0 }}>
         <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:10,alignItems:"center" }}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="ابحث بالاسم أو الفئة..."
+          <input ref={searchRef} value={search} onChange={e=>setSearch(e.target.value)} placeholder="ابحث بالاسم أو الفئة..."
             style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none",width:220 }} />
           <select value={catFilter} onChange={e=>setCatFilter(e.target.value)}
             style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
@@ -369,6 +374,7 @@ function InventoryPage({ inventory, categories, onAdd, onEdit, onDelete, onBulkA
   const [stocktakeMonth, setStocktakeMonth] = useState(today().slice(0,7));
   const [form, setForm] = useState({ name:"",category:"",qty:0,minQty:0,cost:0,price:0,unit:"قطعة" });
   const [pendingReview, setPendingReview] = useState(null); // { updated, added, notCounted, shortages, lossValue, gainValue, finalRecords }
+  const searchRef = useRef(null);
   const [lastUpdate, setLastUpdate] = useState(() => {
     try { const raw = localStorage.getItem("inv_last_update_"+(userId||"")); return raw ? JSON.parse(raw) : null; } catch { return null; }
   });
@@ -482,6 +488,12 @@ function InventoryPage({ inventory, categories, onAdd, onEdit, onDelete, onBulkA
     setPendingReview(null);
   };
 
+  usePageShortcuts("إدارة المخزون", [
+    { combo:"ctrl+n", label:"إضافة صنف جديد", description:"يفتح نموذج إضافة صنف للمخزون", enabled:!showModal, handler:openAdd },
+    { combo:"ctrl+f", label:"البحث في المخزون", description:"يركّز على مربع البحث بالاسم أو الكود", enabled:!showModal, handler:()=>searchRef.current?.focus() },
+    { combo:"ctrl+s", label:"حفظ الصنف", description:"يحفظ نموذج الصنف المفتوح حاليًا", enabled:showModal, handler:handleSave },
+  ]);
+
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
       {PasscodeGate}
@@ -517,7 +529,7 @@ function InventoryPage({ inventory, categories, onAdd, onEdit, onDelete, onBulkA
       )}
       <Card style={{ padding:0 }}>
         <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="ابحث بالاسم أو الكود..."
+          <input ref={searchRef} value={search} onChange={e=>setSearch(e.target.value)} placeholder="ابحث بالاسم أو الكود..."
             style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none",width:200 }} />
           <select value={catFilter} onChange={e=>setCatFilter(e.target.value)}
             style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
@@ -667,17 +679,23 @@ function InventoryPage({ inventory, categories, onAdd, onEdit, onDelete, onBulkA
 function CategoriesPage({ categories, onAdd, onDelete }) {
   const [newCat, setNewCat] = useState("");
   const [confirmDel, setConfirmDel] = useState(null);
+  const newCatRef = useRef(null);
   const handleAdd = () => {
     if (!newCat.trim()) return;
     onAdd(newCat.trim());
     setNewCat("");
   };
+
+  usePageShortcuts("الفئات", [
+    { combo:"ctrl+n", label:"فئة جديدة", description:"يركّز على حقل إضافة فئة جديدة (اكتب واضغط Enter)", handler:()=>newCatRef.current?.focus() },
+  ]);
+
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
       <PageHeader title="الفئات" icon={I.categories} subtitle={`${categories.length} فئة مسجلة`} />
       <Card>
         <div style={{ display:"flex",gap:10,marginBottom:22 }}>
-          <input value={newCat} onChange={e=>setNewCat(e.target.value)} placeholder="اسم الفئة الجديدة..."
+          <input ref={newCatRef} value={newCat} onChange={e=>setNewCat(e.target.value)} placeholder="اسم الفئة الجديدة..."
             onKeyDown={e=>e.key==="Enter"&&handleAdd()}
             style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",flex:1 }}
             onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
@@ -1074,6 +1092,11 @@ function ReceiptsPage({ receipts=[], onAdd, onUpdate, onDelete, security, pageId
   const byMethod = { نقدي:0, شيك:0, تحويل:0, فيزا:0 };
   receipts.forEach(r=>{ if (byMethod[r.paymentMethod]!==undefined) byMethod[r.paymentMethod]+=r.amount; });
 
+  usePageShortcuts("المقبوضات", [
+    { combo:"ctrl+n", label:"سند قبض جديد", description:"يفتح نموذج إضافة مقبوض", enabled:!showModal, handler:openAdd },
+    { combo:"ctrl+s", label:"حفظ السند", description:"يحفظ سند القبض المفتوح حاليًا", enabled:showModal, handler:handleAdd },
+  ]);
+
   const inp = { background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box" };
 
   return (
@@ -1229,6 +1252,13 @@ function ExpensesPage({ expenses=[], onAdd, onUpdate, onDelete, security, pageId
   const byCategory = {};
   filtered.forEach(e=>{ byCategory[e.category]=(byCategory[e.category]||0)+e.amount; });
   const months = [...new Set(expenses.map(e=>e.date?.slice(0,7)))].filter(Boolean).sort().reverse();
+  const filterRef = useRef(null);
+
+  usePageShortcuts("المصروفات", [
+    { combo:"ctrl+n", label:"مصروف جديد", description:"يفتح نموذج إضافة مصروف", enabled:!showModal, handler:openAdd },
+    { combo:"ctrl+f", label:"البحث في المصروفات", description:"يركّز على مربع البحث بالوصف أو الفئة", enabled:!showModal, handler:()=>filterRef.current?.focus() },
+    { combo:"ctrl+s", label:"حفظ المصروف", description:"يحفظ المصروف المفتوح حاليًا", enabled:showModal, handler:handleSave },
+  ]);
 
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
@@ -1256,7 +1286,7 @@ function ExpensesPage({ expenses=[], onAdd, onUpdate, onDelete, security, pageId
       )}
       <Card style={{ padding:0 }}>
         <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
-          <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="ابحث..." style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none",width:200 }} />
+          <input ref={filterRef} value={filter} onChange={e=>setFilter(e.target.value)} placeholder="ابحث..." style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none",width:200 }} />
           <select value={monthFilter} onChange={e=>setMonthFilter(e.target.value)} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
             <option value="">كل الأشهر</option>
             {months.map(m=><option key={m} value={m}>{m}</option>)}

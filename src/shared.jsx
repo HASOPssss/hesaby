@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useContext, createContext, forwardRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -533,6 +533,7 @@ const I = {
   revenue: "M12 1v22M17 5H9.5a3.5 3.5 0 100 7h5a3.5 3.5 0 110 7H6",
   inventory: "M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16zM3.27 6.96L12 12.01l8.73-5.05M12 22.08V12",
   tax: "M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M9 15l2 2 4-4",
+  keyboard: "M2 6a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8",
   stocktake: "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11",
   categories: "M4 6h16M4 10h16M4 14h16M4 18h16",
   plus: "M12 5v14M5 12h14",
@@ -981,6 +982,13 @@ function PasscodeDialog({ onConfirm, onCancel, title = "أدخل رمز الحم
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
 
+  // Esc تقفل أي نافذة منبثقة في النظام — الديالوج ده جزء منها
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
   const handleVerify = () => {
     const cached = getCachedPasscode();
     if (!cached) { setErr("لم يتم ضبط رمز حماية لهذه الشركة بعد. من فضلك اضبطه من إعدادات الشركة أولاً."); return; }
@@ -1094,6 +1102,13 @@ function usePasscodeGate(security) {
 
 // ─── CONFIRM DIALOG ───────────────────────────────────────────────────────────
 function ConfirmDialog({ message, onConfirm, onCancel }) {
+  // Esc تقفل أي نافذة منبثقة في النظام — الديالوج ده جزء منها
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
   return (
     <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000 }}>
       <div style={{ background:C.surface,border:`1px solid ${C.red}44`,borderRadius:18,padding:"28px 32px",maxWidth:380,width:"90%",textAlign:"center",boxShadow:`0 0 60px ${C.red}22` }}>
@@ -1109,6 +1124,191 @@ function ConfirmDialog({ message, onConfirm, onCancel }) {
       </div>
     </div>
   );
+}
+
+// ─── نظام اختصارات لوحة المفاتيح (Keyboard Shortcuts) ─────────────────────────
+// فكرة التصميم: كل صفحة بتسجّل اختصاراتها الخاصة (Ctrl+S للحفظ، Ctrl+N لسجل
+// جديد، Ctrl+F للبحث، Delete للحذف...إلخ) عن طريق usePageShortcuts، وبتحدد
+// بنفسها enabled:false لو المستخدم مالوش صلاحية — بالظبط نفس الفحص اللي
+// بيحصل قبل إظهار زرار "إضافة" أو "حذف" بالماوس، فمفيش نظام صلاحيات موازي.
+// - لو الاختصار مسجّل بس enabled:false، الضغط عليه بيوقف تنفيذ أي حاجة
+//   ويطلع توست "ليس لديك صلاحية" — بالظبط زي لو ضغط على زرار متعطل.
+// - Esc بيتعامل معاه كل من Modal/ConfirmDialog/PasscodeDialog بنفسه (فوق)،
+//   مش هنا، عشان يشتغل صح مهما كانت النافذة المفتوحة وبدون أي تسجيل يدوي.
+// - Ctrl + / بتفتح/تقفل نافذة الاختصارات من أي مكان في النظام.
+// - أي اختصار مش مسجّل من الصفحة الحالية بيتجاهل تمامًا ومايعملش preventDefault،
+//   عشان لو حد مسجّلش Ctrl+F مثلاً، بحث المتصفح الطبيعي (Ctrl+F) يفضل شغال عادي.
+// - الاختصارات اللي ممكن تتصادم مع الكتابة العادية (Delete تحديدًا) بتتجاهل
+//   تلقائيًا لو الفوكس في input/textarea/select، إلا لو الصفحة صرّحت
+//   allowInEditable:true صراحةً.
+const ShortcutsContext = createContext(null);
+
+const isEditableTarget = (el) => {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+};
+
+// combo نصي زي "ctrl+n" أو "ctrl+shift+n" أو "ctrl+/" أو "delete"
+const eventMatchesCombo = (e, combo) => {
+  const parts = combo.toLowerCase().split("+").map(p => p.trim());
+  const mainPart = parts[parts.length - 1];
+  const wantCtrl = parts.includes("ctrl");
+  const wantShift = parts.includes("shift");
+  const wantAlt = parts.includes("alt");
+  const hasCtrl = e.ctrlKey || e.metaKey; // metaKey عشان تشتغل بـ Cmd على ماك برضه
+  if (wantCtrl !== hasCtrl) return false;
+  if (wantShift !== e.shiftKey) return false;
+  if (wantAlt !== e.altKey) return false;
+  const keyMap = { esc: "escape" };
+  const target = keyMap[mainPart] || mainPart;
+  return e.key.toLowerCase() === target;
+};
+
+const shortcutDisplayCombo = (combo) => combo.split("+").map(p => {
+  const k = p.trim().toLowerCase();
+  if (k === "ctrl") return "Ctrl";
+  if (k === "shift") return "Shift";
+  if (k === "alt") return "Alt";
+  if (k === "esc") return "Esc";
+  if (k === "delete") return "Delete";
+  if (k === "enter") return "Enter";
+  if (k === "/") return "/";
+  return k.length === 1 ? k.toUpperCase() : k.charAt(0).toUpperCase() + k.slice(1);
+}).join(" + ");
+
+const GLOBAL_SHORTCUTS_INFO = [
+  { combo: "Esc", label: "إغلاق النافذة الحالية", description: "يقفل أي نافذة منبثقة أو رسالة تأكيد أو شاشة Passcode مفتوحة" },
+  { combo: "Tab  /  Shift + Tab", label: "التنقل بين الحقول", description: "ينتقل للحقل التالي أو السابق داخل أي نموذج" },
+  { combo: "Ctrl + /", label: "اختصارات لوحة المفاتيح", description: "يفتح ويقفل نافذة الاختصارات دي" },
+];
+
+function ShortcutRow({ combo, label, description }) {
+  return (
+    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,background:C.surface2,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px" }}>
+      <div>
+        <div style={{ fontSize:13,fontWeight:600,color:C.text }}>{label}</div>
+        {description && <div style={{ fontSize:11,color:C.textMuted,marginTop:2,lineHeight:1.6 }}>{description}</div>}
+      </div>
+      <kbd style={{ background:C.surface3,border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontFamily:"monospace",color:C.accent,whiteSpace:"nowrap",flexShrink:0 }}>{combo}</kbd>
+    </div>
+  );
+}
+
+function ShortcutsHelpModal({ snapshot, onClose }) {
+  const list = (snapshot?.list || []).filter(s => s.enabled !== false && s.label);
+  return (
+    <Modal title="اختصارات لوحة المفاتيح" onClose={onClose}>
+      <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+        <div>
+          <div style={{ fontSize:12,fontWeight:700,color:C.textMuted,marginBottom:8 }}>عامة (في كل الصفحات)</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+            {GLOBAL_SHORTCUTS_INFO.map(s => <ShortcutRow key={s.combo} combo={s.combo} label={s.label} description={s.description} />)}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize:12,fontWeight:700,color:C.textMuted,marginBottom:8 }}>
+            في هذه الصفحة{snapshot?.pageLabel ? ` — ${snapshot.pageLabel}` : ""}
+          </div>
+          {list.length > 0 ? (
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              {list.map(s => <ShortcutRow key={s.combo} combo={shortcutDisplayCombo(s.combo)} label={s.label} description={s.description} />)}
+            </div>
+          ) : (
+            <div style={{ fontSize:12,color:C.textMuted,background:C.surface2,borderRadius:10,padding:14,textAlign:"center" }}>
+              لا توجد اختصارات إضافية متاحة لك في هذه الصفحة.
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// يلف التطبيق كله (مرة واحدة). بيسمع لضغطات الكيبورد على مستوى window ويوزّعها
+// على اختصارات الصفحة الحالية المسجّلة، ومسؤول عن نافذة المساعدة (Ctrl+/).
+function KeyboardShortcutsProvider({ children }) {
+  const registryRef = useRef({ pageLabel:"", list:[] });
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpSnapshot, setHelpSnapshot] = useState({ pageLabel:"", list:[] });
+  const helpOpenRef = useRef(false);
+  useEffect(() => { helpOpenRef.current = helpOpen; }, [helpOpen]);
+
+  const registerPage = useCallback((pageLabel, list) => {
+    registryRef.current = { pageLabel: pageLabel || "", list: list || [] };
+  }, []);
+
+  const openHelp = useCallback(() => {
+    setHelpSnapshot(registryRef.current);
+    setHelpOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (eventMatchesCombo(e, "ctrl+/")) {
+        e.preventDefault();
+        setHelpSnapshot(registryRef.current);
+        setHelpOpen(h => !h);
+        return;
+      }
+      if (helpOpenRef.current) return; // نافذة المساعدة نفسها بتتقفل بـ Esc عن طريق Modal
+      const editable = isEditableTarget(document.activeElement);
+      for (const sc of registryRef.current.list) {
+        if (!sc.combo || !eventMatchesCombo(e, sc.combo)) continue;
+        if (editable && !sc.allowInEditable) continue;
+        e.preventDefault();
+        if (sc.enabled === false) {
+          showPermissionToast(sc.deniedMessage || "ليس لديك صلاحية لتنفيذ هذا الإجراء", "error");
+        } else if (sc.handler) {
+          sc.handler(e);
+        }
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  return (
+    <ShortcutsContext.Provider value={{ registerPage, openHelp }}>
+      {children}
+      {helpOpen && <ShortcutsHelpModal snapshot={helpSnapshot} onClose={() => setHelpOpen(false)} />}
+    </ShortcutsContext.Provider>
+  );
+}
+
+// بيستخدم من أي صفحة عشان تسجّل اختصاراتها الخاصة. shortcuts array من عناصر:
+// { combo:"ctrl+n", label:"فاتورة جديدة", description:"...", enabled:perms.canAdd,
+//   handler:()=>..., allowInEditable:false, deniedMessage:"..." }
+// pageLabel: اسم عربي قصير للصفحة (بيظهر في نافذة المساعدة).
+function usePageShortcuts(pageLabel, shortcuts) {
+  const ctx = useContext(ShortcutsContext);
+  const latestRef = useRef(shortcuts);
+  latestRef.current = shortcuts; // يتحدث في كل render من غير أي setState — يمنع الـ stale closures
+
+  // "بصمة" نصية بالمحتوى الوصفي بس (مش الـ handler نفسها) عشان نتجنب إعادة
+  // التسجيل (ومن ثم إعادة الـ render) في كل مرة الصفحة بترندر عادي
+  const sig = shortcuts.map(s => `${s.combo}|${s.label}|${s.enabled !== false}|${!!s.allowInEditable}`).join(";;");
+
+  useEffect(() => {
+    if (!ctx) return;
+    const wrapped = latestRef.current.map(s => ({
+      ...s,
+      handler: (...args) => {
+        const fresh = latestRef.current.find(x => x.combo === s.combo);
+        if (fresh && fresh.handler) fresh.handler(...args);
+      },
+    }));
+    ctx.registerPage(pageLabel, wrapped);
+    return () => ctx.registerPage("", []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx, pageLabel, sig]);
+}
+
+// زرار "اختصارات لوحة المفاتيح" من القائمة (بديل لـ Ctrl+/)
+function useOpenShortcutsHelp() {
+  const ctx = useContext(ShortcutsContext);
+  return () => ctx?.openHelp?.();
 }
 
 // ─── BASE COMPONENTS ──────────────────────────────────────────────────────────
@@ -1365,17 +1565,17 @@ function MonthPicker({ label, value, onChange, required=false }) {
   );
 }
 
-const Inp = ({ label, value, onChange, type="text", placeholder="", required=false }) => {
+const Inp = forwardRef(({ label, value, onChange, type="text", placeholder="", required=false }, ref) => {
   const isMobile = useIsMobile();
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
       {label && <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>{label}{required && <span style={{ color:C.red }}> *</span>}</label>}
-      <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+      <input ref={ref} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
         style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:isMobile?"12px 13px":"9px 13px",color:C.text,fontSize:isMobile?16:13,fontFamily:"inherit",outline:"none",transition:"border-color 0.2s",boxSizing:"border-box",width:"100%" }}
         onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
     </div>
   );
-};
+});
 
 const Sel = ({ label, value, onChange, options, placeholder="-- اختر --" }) => {
   const isMobile = useIsMobile();
@@ -1392,6 +1592,14 @@ const Sel = ({ label, value, onChange, options, placeholder="-- اختر --" }) 
 
 const Modal = ({ title, onClose, children, wide=false }) => {
   const isMobile = useIsMobile();
+
+  // Esc تقفل أي نافذة منبثقة في النظام — الـ Modal العام ده جزء منها
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:isMobile?12:16 }}>
       <div style={{
@@ -1566,5 +1774,6 @@ export {
   PageHeader, ProgressBar, SectionTitle, ADMIN_EMAIL, Logo,
   ALL_PAGES, ROLE_PRESETS, ROLE_TEMPLATES, SUPERVISOR_TEMPLATE,
   showPermissionToast, PermissionToastProvider,
+  KeyboardShortcutsProvider, usePageShortcuts, useOpenShortcutsHelp,
 };
 export { C };

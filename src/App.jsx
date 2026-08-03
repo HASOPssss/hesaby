@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase, useAppData, C, I, Logo, ADMIN_EMAIL, ALL_PAGES, SUPERVISOR_TEMPLATE, showPermissionToast, setCachedPasscode, heartbeatSession, releaseSession } from "./shared";
+import { supabase, useAppData, C, I, Logo, ADMIN_EMAIL, ALL_PAGES, SUPERVISOR_TEMPLATE, showPermissionToast, setCachedPasscode, heartbeatSession, releaseSession, KeyboardShortcutsProvider } from "./shared";
 import { LoginScreen, SetPasswordScreen, SubscriptionExpired } from "./LoginScreen";
 import AdminPanel from "./AdminPanel";
 import AppShell from "./AppShell";
@@ -10,7 +10,7 @@ import AppShell from "./AppShell";
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-export default function App() {
+function AppInner() {
   const [page, setPage] = useState("dash");
   const [userId, setUserId] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
@@ -461,6 +461,17 @@ export default function App() {
     security={ownerSecurity}
     allowedPages={companyAllowedPages}
   />;
+}
+
+// الاختصارات الشغالة من أي مكان (Ctrl+/ للمساعدة، Esc لأي نافذة) لازم تلف
+// التطبيق كله بما فيه شاشة تسجيل الدخول — عشان كده اللف بيحصل هنا فوق كل حالات
+// الـ return المختلفة جوه AppInner (تحميل / تسجيل دخول / التطبيق نفسه).
+export default function App() {
+  return (
+    <KeyboardShortcutsProvider>
+      <AppInner />
+    </KeyboardShortcutsProvider>
+  );
 }
 
 // ─── APP SHELL (Sidebar + Content) ────────────────────────────────────────────

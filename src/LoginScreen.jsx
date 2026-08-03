@@ -253,6 +253,7 @@ function LoginScreen({ onSubUserLogin }) {
               <label style={{ fontSize:11, color:C.textMuted, fontWeight:700, letterSpacing:0.5, textTransform:"uppercase" }}>البريد الإلكتروني</label>
               <input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} type="email"
                 placeholder="example@company.com" style={inp}
+                onKeyDown={e=>e.key==="Enter"&&handleLogin()}
                 onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
@@ -283,6 +284,7 @@ function LoginScreen({ onSubUserLogin }) {
               <label style={{ fontSize:11, color:C.textMuted, fontWeight:700, letterSpacing:0.5, textTransform:"uppercase" }}>اسم المستخدم</label>
               <input value={empForm.username} onChange={e=>setEmpForm({...empForm,username:e.target.value})}
                 placeholder="ahmed_sales"
+                onKeyDown={e=>e.key==="Enter"&&handleEmployeeLogin()}
                 style={{...inp, direction:"ltr", textAlign:"right"}}
                 onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border} />
             </div>
