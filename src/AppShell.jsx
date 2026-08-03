@@ -194,19 +194,33 @@ function AppShell({ page, setPage, navGroups, data, actions, loading, userEmail,
             <Ic d={I.logout} s={14} c={C.red} />
             {!collapsed && "تسجيل الخروج"}
           </button>
-          {/* اختصارات لوحة المفاتيح */}
-          <button onClick={openShortcutsHelp} title={collapsed?"اختصارات لوحة المفاتيح (Ctrl + /)":""}
-            style={{ marginTop:6, width:"100%",display:"flex",alignItems:"center",gap:collapsed?0:8, padding:collapsed?"9px 0":(isMobile?"12px 12px":"9px 12px"),borderRadius:10,border:`1px solid ${C.border}`, cursor:"pointer",fontFamily:"inherit",fontSize:isMobile?13:12,fontWeight:600, background:C.surface2,color:C.textDim,transition:"all 0.2s",justifyContent:collapsed?"center":"flex-start" }}>
-            <Ic d={I.keyboard} s={14} c={C.textDim} />
-            {!collapsed && <span style={{ display:"flex",alignItems:"center",gap:6,flex:1 }}>اختصارات لوحة المفاتيح <kbd style={{ marginRight:"auto",fontSize:9,fontFamily:"monospace",color:C.textMuted,background:C.surface3,border:`1px solid ${C.border}`,borderRadius:4,padding:"1px 5px" }}>Ctrl+/</kbd></span>}
-          </button>
-          {/* Theme toggle */}
-          <button onClick={()=>{ const t = theme==="dark"?"light":"dark"; setThemeState(t); }}
-            title={collapsed?(theme==="dark"?"وضع النهار":"الوضع الليلي"):""}
-            style={{ marginTop:6, width:"100%",display:"flex",alignItems:"center",gap:collapsed?0:8, padding:collapsed?"9px 0":(isMobile?"12px 12px":"9px 12px"),borderRadius:10,border:`1px solid ${C.border}`, cursor:"pointer",fontFamily:"inherit",fontSize:isMobile?13:12,fontWeight:600, background:C.surface2,color:C.textDim,transition:"all 0.2s",justifyContent:collapsed?"center":"flex-start" }}>
-            <span style={{ fontSize:14 }}>{theme==="dark"?"☀️":"🌙"}</span>
-            {!collapsed && (theme==="dark" ? "وضع النهار" : "الوضع الليلي")}
-          </button>
+          {!collapsed ? (
+            <div style={{ display:"flex", gap:6, marginTop:6 }}>
+              {/* الوضع الليلي / النهاري */}
+              <button onClick={()=>{ const t = theme==="dark"?"light":"dark"; setThemeState(t); }}
+                style={{ flex:1, display:"flex",alignItems:"center",gap:8, padding:isMobile?"12px 12px":"9px 12px",borderRadius:10,border:`1px solid ${C.border}`, cursor:"pointer",fontFamily:"inherit",fontSize:isMobile?13:12,fontWeight:600, background:C.surface2,color:C.textDim,transition:"all 0.2s",justifyContent:"flex-start" }}>
+                <span style={{ fontSize:14 }}>{theme==="dark"?"☀️":"🌙"}</span>
+                {theme==="dark" ? "وضع النهار" : "الوضع الليلي"}
+              </button>
+              {/* اختصارات لوحة المفاتيح — زرار صغير بأيكون بس */}
+              <button onClick={openShortcutsHelp} title="اختصارات لوحة المفاتيح (Ctrl + /)"
+                style={{ width:36, height:36, flexShrink:0, display:"flex",alignItems:"center",justifyContent:"center", borderRadius:10,border:`1px solid ${C.border}`, cursor:"pointer", background:C.surface2,color:C.textDim,transition:"all 0.2s" }}>
+                <Ic d={I.keyboard} s={15} c={C.textDim} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <button onClick={openShortcutsHelp} title="اختصارات لوحة المفاتيح (Ctrl + /)"
+                style={{ marginTop:6, width:"100%",display:"flex",alignItems:"center",justifyContent:"center", padding:"9px 0",borderRadius:10,border:`1px solid ${C.border}`, cursor:"pointer", background:C.surface2,color:C.textDim,transition:"all 0.2s" }}>
+                <Ic d={I.keyboard} s={14} c={C.textDim} />
+              </button>
+              <button onClick={()=>{ const t = theme==="dark"?"light":"dark"; setThemeState(t); }}
+                title={theme==="dark"?"وضع النهار":"الوضع الليلي"}
+                style={{ marginTop:6, width:"100%",display:"flex",alignItems:"center",justifyContent:"center", padding:"9px 0",borderRadius:10,border:`1px solid ${C.border}`, cursor:"pointer", background:C.surface2,color:C.textDim,transition:"all 0.2s" }}>
+                <span style={{ fontSize:14 }}>{theme==="dark"?"☀️":"🌙"}</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 

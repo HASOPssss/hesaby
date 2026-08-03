@@ -1195,31 +1195,50 @@ function ShortcutRow({ combo, label, description }) {
   );
 }
 
-function ShortcutsHelpModal({ snapshot, onClose }) {
-  const list = (snapshot?.list || []).filter(s => s.enabled !== false && s.label);
+// نافذة المساعدة بتعرض كل الاختصارات المتاحة (العامة + كل صفحة زُرت خلال
+// الجلسة دي)، وبتحوّط بإطار أخضر الصفحة اللي انت فاتحها دلوقتي بالظبط، عشان
+// تفرّق بسرعة بين "شغال هنا دلوقتي" و"شغال في صفحات تانية".
+function ShortcutsHelpModal({ catalog, activePageLabel, onClose }) {
+  const pageEntries = Object.entries(catalog || {}).filter(([, list]) => (list || []).some(s => s.enabled !== false && s.label));
   return (
-    <Modal title="اختصارات لوحة المفاتيح" onClose={onClose}>
-      <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+    <Modal title="اختصارات لوحة المفاتيح" onClose={onClose} wide>
+      <div style={{ display:"flex",flexDirection:"column",gap:18 }}>
         <div>
           <div style={{ fontSize:12,fontWeight:700,color:C.textMuted,marginBottom:8 }}>عامة (في كل الصفحات)</div>
           <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
             {GLOBAL_SHORTCUTS_INFO.map(s => <ShortcutRow key={s.combo} combo={s.combo} label={s.label} description={s.description} />)}
           </div>
         </div>
-        <div>
-          <div style={{ fontSize:12,fontWeight:700,color:C.textMuted,marginBottom:8 }}>
-            في هذه الصفحة{snapshot?.pageLabel ? ` — ${snapshot.pageLabel}` : ""}
+
+        {pageEntries.length === 0 ? (
+          <div style={{ fontSize:12,color:C.textMuted,background:C.surface2,borderRadius:10,padding:14,textAlign:"center" }}>
+            لسه معملتش أي اختصارات خاصة بصفحات — بتظهر هنا أول ما تفتح صفحة فيها اختصارات.
           </div>
-          {list.length > 0 ? (
-            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-              {list.map(s => <ShortcutRow key={s.combo} combo={shortcutDisplayCombo(s.combo)} label={s.label} description={s.description} />)}
+        ) : pageEntries.map(([pageLabel, list]) => {
+          const isActive = pageLabel === activePageLabel;
+          const rows = list.filter(s => s.enabled !== false && s.label);
+          if (rows.length === 0) return null;
+          return (
+            <div key={pageLabel} style={{
+              border: isActive ? `2px solid ${C.green}` : `1px solid transparent`,
+              borderRadius: 14, padding: isActive ? 12 : 0,
+              background: isActive ? `${C.green}0d` : "transparent",
+              transition:"all 0.2s",
+            }}>
+              <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
+                <div style={{ fontSize:12,fontWeight:700,color: isActive ? C.green : C.textMuted }}>{pageLabel}</div>
+                {isActive && (
+                  <span style={{ fontSize:10,fontWeight:700,color:C.green,background:`${C.green}18`,border:`1px solid ${C.green}44`,borderRadius:20,padding:"1px 8px" }}>
+                    الصفحة المفتوحة الآن
+                  </span>
+                )}
+              </div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {rows.map(s => <ShortcutRow key={s.combo} combo={shortcutDisplayCombo(s.combo)} label={s.label} description={s.description} />)}
+              </div>
             </div>
-          ) : (
-            <div style={{ fontSize:12,color:C.textMuted,background:C.surface2,borderRadius:10,padding:14,textAlign:"center" }}>
-              لا توجد اختصارات إضافية متاحة لك في هذه الصفحة.
-            </div>
-          )}
-        </div>
+          );
+        })}
       </div>
     </Modal>
   );
@@ -1227,19 +1246,38 @@ function ShortcutsHelpModal({ snapshot, onClose }) {
 
 // يلف التطبيق كله (مرة واحدة). بيسمع لضغطات الكيبورد على مستوى window ويوزّعها
 // على اختصارات الصفحة الحالية المسجّلة، ومسؤول عن نافذة المساعدة (Ctrl+/).
+//
+// فيه فرق مهم بين حاجتين بيتابعهم الـ Provider:
+// - liveListRef: اختصارات الصفحة المفتوحة فعليًا دلوقتي بس — ده اللي بيتنفذ
+//   فعلاً لما تضغط أي combo، عشان منشغلش handler لصفحة اتقفلت.
+// - catalogRef: أرشيف تراكمي لكل صفحة اتفتحت خلال الجلسة دي (مبيتمسحش لما
+//   تقفل الصفحة) — ده اللي نافذة المساعدة بتعرضه كله، عشان "كل الاختصارات"
+//   تفضل ظاهرة حتى لو رجعت لصفحة تانية.
 function KeyboardShortcutsProvider({ children }) {
-  const registryRef = useRef({ pageLabel:"", list:[] });
+  const liveListRef = useRef([]);
+  const activePageRef = useRef("");
+  const catalogRef = useRef({});
   const [helpOpen, setHelpOpen] = useState(false);
-  const [helpSnapshot, setHelpSnapshot] = useState({ pageLabel:"", list:[] });
+  const [helpSnapshot, setHelpSnapshot] = useState({ catalog:{}, activePageLabel:"" });
   const helpOpenRef = useRef(false);
   useEffect(() => { helpOpenRef.current = helpOpen; }, [helpOpen]);
 
   const registerPage = useCallback((pageLabel, list) => {
-    registryRef.current = { pageLabel: pageLabel || "", list: list || [] };
+    liveListRef.current = list || [];
+    activePageRef.current = pageLabel || "";
+    if (pageLabel) catalogRef.current = { ...catalogRef.current, [pageLabel]: list || [] };
   }, []);
 
+  const unregisterPage = useCallback((pageLabel) => {
+    liveListRef.current = [];
+    if (activePageRef.current === pageLabel) activePageRef.current = "";
+    // ملحوظة: عمدًا مش بنمسح catalogRef[pageLabel] هنا — عايزينها تفضل في الأرشيف
+  }, []);
+
+  const snapshotNow = () => ({ catalog: catalogRef.current, activePageLabel: activePageRef.current });
+
   const openHelp = useCallback(() => {
-    setHelpSnapshot(registryRef.current);
+    setHelpSnapshot(snapshotNow());
     setHelpOpen(true);
   }, []);
 
@@ -1247,13 +1285,13 @@ function KeyboardShortcutsProvider({ children }) {
     const handler = (e) => {
       if (eventMatchesCombo(e, "ctrl+/")) {
         e.preventDefault();
-        setHelpSnapshot(registryRef.current);
+        setHelpSnapshot(snapshotNow());
         setHelpOpen(h => !h);
         return;
       }
       if (helpOpenRef.current) return; // نافذة المساعدة نفسها بتتقفل بـ Esc عن طريق Modal
       const editable = isEditableTarget(document.activeElement);
-      for (const sc of registryRef.current.list) {
+      for (const sc of liveListRef.current) {
         if (!sc.combo || !eventMatchesCombo(e, sc.combo)) continue;
         if (editable && !sc.allowInEditable) continue;
         e.preventDefault();
@@ -1270,9 +1308,9 @@ function KeyboardShortcutsProvider({ children }) {
   }, []);
 
   return (
-    <ShortcutsContext.Provider value={{ registerPage, openHelp }}>
+    <ShortcutsContext.Provider value={{ registerPage, unregisterPage, openHelp }}>
       {children}
-      {helpOpen && <ShortcutsHelpModal snapshot={helpSnapshot} onClose={() => setHelpOpen(false)} />}
+      {helpOpen && <ShortcutsHelpModal catalog={helpSnapshot.catalog} activePageLabel={helpSnapshot.activePageLabel} onClose={() => setHelpOpen(false)} />}
     </ShortcutsContext.Provider>
   );
 }
@@ -1300,7 +1338,7 @@ function usePageShortcuts(pageLabel, shortcuts) {
       },
     }));
     ctx.registerPage(pageLabel, wrapped);
-    return () => ctx.registerPage("", []);
+    return () => ctx.unregisterPage(pageLabel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, pageLabel, sig]);
 }
@@ -1310,6 +1348,7 @@ function useOpenShortcutsHelp() {
   const ctx = useContext(ShortcutsContext);
   return () => ctx?.openHelp?.();
 }
+
 
 // ─── BASE COMPONENTS ──────────────────────────────────────────────────────────
 const Badge = ({ label }) => {
