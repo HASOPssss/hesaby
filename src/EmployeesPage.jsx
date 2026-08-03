@@ -12,6 +12,14 @@ import {
 // بين صاحب الحساب وكل الموظفين المصرح لهم بدل ما تختلف من جهاز لجهاز.
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ─── شهور السنة (لعنصر اختيار الشهر بتصميم Segmented/Chips) ─────────────────
+const MONTHS_OF_YEAR = [
+  { value:"01", label:"يناير" }, { value:"02", label:"فبراير" }, { value:"03", label:"مارس" },
+  { value:"04", label:"أبريل" }, { value:"05", label:"مايو" }, { value:"06", label:"يونيو" },
+  { value:"07", label:"يوليو" }, { value:"08", label:"أغسطس" }, { value:"09", label:"سبتمبر" },
+  { value:"10", label:"أكتوبر" }, { value:"11", label:"نوفمبر" }, { value:"12", label:"ديسمبر" },
+];
+
 // ─── PRINT SALARY SLIP ───────────────────────────────────────────────────────
 const printSalarySlip = (sal, emp, attList, advList) => {
   const { name: companyName, logo: companyLogo } = getCompanyBranding();
@@ -164,7 +172,9 @@ function EmployeesPage({
   });
   const [attForm, setAttForm] = useState({ employeeId:"", date:today(), type:"غياب", reason:"", deductAmount:"" });
   const [advForm, setAdvForm] = useState({ employeeId:"", date:today(), amount:"", reason:"", status:"قيد السداد" });
-  const [archiveMonth, setArchiveMonth] = useState(today().slice(0,7));
+  const [archiveYear, setArchiveYear] = useState(today().slice(0,4));
+  const [archiveMonthNum, setArchiveMonthNum] = useState(today().slice(5,7));
+  const archiveMonth = `${archiveYear}-${archiveMonthNum}`;
   const [empMsg, setEmpMsg] = useState({ text:"", type:"success" });
   const showEmpMsg = (text, type="success") => { setEmpMsg({text,type}); setTimeout(()=>setEmpMsg({text:"",type:"success"}),3500); };
   const [lastPaidSal, setLastPaidSal] = useState(null); // آخر مرتب اتصرف — لعرض زرار الطباعة
@@ -410,6 +420,17 @@ function EmployeesPage({
   const archivedMonths = new Set(salaryArchive.map(a=>a.month));
   const activeSalaries = salaries.filter(s=>!archivedMonths.has(s.month));
 
+  // سنوات الأرشيف: السنة الحالية + أي سنوات ظهرت في المرتبات أو الأرشيف، حتى لو مفيش بيانات فيها
+  const archiveYears = [...new Set([
+    today().slice(0,4),
+    ...salaries.map(s=>s.month.slice(0,4)),
+    ...salaryArchive.map(a=>a.month.slice(0,4)),
+  ])].sort().reverse();
+
+  // بيانات الشهر/السنة المختارة حالياً في تبويب الأرشيف
+  const selectedArchiveEntry = salaryArchive.find(a=>a.month===archiveMonth);
+  const selectedMonthActiveSalaries = salaries.filter(s=>s.month===archiveMonth && !archivedMonths.has(s.month));
+
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
       {empMsg.text && (
@@ -596,73 +617,114 @@ function EmployeesPage({
       )}
 
       {/* Archive Tab */}
-      {tab==="archive" && (
+      {tab==="archive" && (() => {
+        const [sy,sm] = archiveMonth.split("-");
+        const selectedLabel = new Date(+sy,+sm-1,1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"});
+        return (
         <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
           <Card>
-            <div style={{ display:"flex",gap:12,alignItems:"center",flexWrap:"wrap" }}>
-              <span style={{ fontSize:14,fontWeight:700,color:C.text }}>🗂 أرشفة مرتبات شهر</span>
-              <select value={archiveMonth} onChange={e=>setArchiveMonth(e.target.value)}
-                style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 13px",color:C.text,fontSize:12,fontFamily:"inherit" }}>
-                {allSalaryMonths.map(m=><option key={m} value={m}>{m} {archivedMonths.has(m)?"(مأرشف)":""}</option>)}
-                {[...archivedMonths].filter(m=>!allSalaryMonths.includes(m)).map(m=><option key={m} value={m}>{m} (مأرشف)</option>)}
-                {allSalaryMonths.length===0&&salaryArchive.length===0&&<option value={today().slice(0,7)}>{today().slice(0,7)}</option>}
-              </select>
-              <Btn variant="yellow" onClick={()=>handleArchiveMonth(archiveMonth)}><Ic d={I.download} s={14} />حفظ في الأرشيف</Btn>
-              <Btn variant="ghost" onClick={()=>{ const [y,m]=archiveMonth.split("-"); const label=new Date(+y,+m-1,1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"}); handleRestoreArchive(archiveMonth,label); }}><Ic d={I.returns} s={14} />استرداد</Btn>
+            <div style={{ fontSize:14,fontWeight:700,color:C.text,marginBottom:12 }}>🗂 أرشيف المرتبات</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
+                <span style={{ fontSize:12,color:C.textMuted,minWidth:36 }}>الشهر</span>
+                <div style={{ display:"flex",background:C.surface2,borderRadius:12,padding:4,border:`1px solid ${C.border}`,gap:4,flexWrap:"wrap" }}>
+                  {MONTHS_OF_YEAR.map(mo=>(
+                    <button key={mo.value} onClick={()=>setArchiveMonthNum(mo.value)}
+                      style={{ background:archiveMonthNum===mo.value?C.accent:"transparent",color:archiveMonthNum===mo.value?"#fff":C.textMuted,border:"none",borderRadius:9,padding:"7px 12px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
+                      {mo.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap" }}>
+                <span style={{ fontSize:12,color:C.textMuted,minWidth:36 }}>السنة</span>
+                <div style={{ display:"flex",background:C.surface2,borderRadius:12,padding:4,border:`1px solid ${C.border}`,gap:4,flexWrap:"wrap" }}>
+                  {archiveYears.map(y=>(
+                    <button key={y} onClick={()=>setArchiveYear(y)}
+                      style={{ background:archiveYear===y?C.accent:"transparent",color:archiveYear===y?"#fff":C.textMuted,border:"none",borderRadius:9,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s" }}>
+                      {y}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginTop:2 }}>
+                <Btn variant="yellow" onClick={()=>handleArchiveMonth(archiveMonth)}><Ic d={I.download} s={14} />حفظ في الأرشيف</Btn>
+                <Btn variant="ghost" onClick={()=>handleRestoreArchive(archiveMonth,selectedLabel)}><Ic d={I.returns} s={14} />استرداد</Btn>
+              </div>
             </div>
-            <p style={{ margin:"10px 0 0",fontSize:12,color:C.textMuted }}>اختر الشهر ثم اضغط "حفظ في الأرشيف" للأرشفة، أو "استرداد" لإرجاع مرتبات شهر مؤرشف.</p>
+            <p style={{ margin:"10px 0 0",fontSize:12,color:C.textMuted }}>اختر الشهر والسنة ثم اضغط "حفظ في الأرشيف" للأرشفة، أو "استرداد" لإرجاع مرتبات شهر مؤرشف.</p>
           </Card>
-          {salaryArchive.length===0 ? (
-            <Card style={{ textAlign:"center",padding:40 }}>
-              <div style={{ color:C.textMuted,fontSize:13 }}>لا توجد سجلات أرشيف بعد. احفظ مرتبات أي شهر للبدء.</div>
+
+          {/* عرض بيانات الشهر/السنة المختارة */}
+          {selectedArchiveEntry ? (
+            <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:13,padding:"16px 20px" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:10 }}>
+                <div>
+                  <div style={{ fontSize:15,fontWeight:800,color:C.text }}>📁 أرشيف — {selectedLabel}</div>
+                  <div style={{ display:"flex",gap:14,marginTop:6,flexWrap:"wrap" }}>
+                    <span style={{ fontSize:11,color:C.green }}>صافي المرتبات: {fmt(selectedArchiveEntry.totalNet)}</span>
+                    <span style={{ fontSize:11,color:C.red }}>إجمالي الخصومات: {fmt(selectedArchiveEntry.totalDeductions)}</span>
+                    <span style={{ fontSize:11,color:C.accent }}>عدد الموظفين: {selectedArchiveEntry.empCount}</span>
+                  </div>
+                  <div style={{ fontSize:10,color:C.textMuted,marginTop:4 }}>حُفظ في {fmtDateTime(selectedArchiveEntry.archivedAt)}</div>
+                </div>
+                <div style={{ display:"flex",gap:8 }}>
+                  <Btn variant="yellow" small onClick={()=>printAllSalaries(selectedArchiveEntry.salaries,employees,selectedArchiveEntry.attendance||[],selectedArchiveEntry.advances||[],selectedArchiveEntry.month)}>
+                    <Ic d={I.print} s={13} />طباعة
+                  </Btn>
+                  <Btn variant="danger" small onClick={()=>handleDeleteArchive(selectedArchiveEntry.month, selectedLabel)}>
+                    <Ic d={I.trash} s={13} />حذف
+                  </Btn>
+                </div>
+              </div>
+              <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+              <table style={{ width:"100%",minWidth:700,borderCollapse:"collapse",fontSize:12 }}>
+                <THead cols={["الموظف","الراتب الأساسي","إجمالي الخصومات","صافي المرتب","وقت الصرف"]} />
+                <tbody>
+                  {selectedArchiveEntry.salaries.map((s,idx)=>(
+                    <TRow key={s.id} alt={idx%2}>
+                      <TD><span style={{ fontWeight:600 }}>{s.employeeName}</span></TD>
+                      <TD mono>{fmt(s.baseSalary)}</TD>
+                      <TD mono color={C.red}>{fmt(s.totalDeductions||0)}</TD>
+                      <TD mono color={C.accent}><span style={{ fontWeight:800 }}>{fmt(s.netSalary)}</span></TD>
+                      <TD color={C.textMuted} style={{ fontSize:11 }}>{s.paidAt?fmtDateTime(s.paidAt):"—"}</TD>
+                    </TRow>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </div>
+          ) : selectedMonthActiveSalaries.length>0 ? (
+            <Card style={{ textAlign:"center",padding:30 }}>
+              <div style={{ color:C.text,fontSize:13,fontWeight:600 }}>توجد مرتبات مصروفة لشهر {selectedLabel} لم تُؤرشف بعد.</div>
+              <div style={{ color:C.textMuted,fontSize:12,marginTop:6 }}>اضغط "حفظ في الأرشيف" أعلاه لأرشفتها ({selectedMonthActiveSalaries.length} موظف).</div>
             </Card>
           ) : (
-            [...salaryArchive].sort((a,b)=>b.month.localeCompare(a.month)).map(arch=>{
-              const [y,m] = arch.month.split("-");
-              const label = new Date(+y,+m-1,1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"});
-              return (
-                <div key={arch.month} style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:13,padding:"16px 20px" }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-                    <div>
-                      <div style={{ fontSize:15,fontWeight:800,color:C.text }}>📁 أرشيف — {label}</div>
-                      <div style={{ display:"flex",gap:14,marginTop:6 }}>
-                        <span style={{ fontSize:11,color:C.green }}>صافي المرتبات: {fmt(arch.totalNet)}</span>
-                        <span style={{ fontSize:11,color:C.red }}>إجمالي الخصومات: {fmt(arch.totalDeductions)}</span>
-                        <span style={{ fontSize:11,color:C.accent }}>عدد الموظفين: {arch.empCount}</span>
-                      </div>
-                      <div style={{ fontSize:10,color:C.textMuted,marginTop:4 }}>حُفظ في {fmtDateTime(arch.archivedAt)}</div>
-                    </div>
-                    <div style={{ display:"flex",gap:8 }}>
-                      <Btn variant="yellow" small onClick={()=>printAllSalaries(arch.salaries,employees,arch.attendance||[],arch.advances||[],arch.month)}>
-                        <Ic d={I.print} s={13} />طباعة
-                      </Btn>
-                      <Btn variant="danger" small onClick={()=>handleDeleteArchive(arch.month, label)}>
-                        <Ic d={I.trash} s={13} />حذف
-                      </Btn>
-                    </div>
-                  </div>
-                  <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
-                  <table style={{ width:"100%",minWidth:700,borderCollapse:"collapse",fontSize:12 }}>
-                    <THead cols={["الموظف","الراتب الأساسي","إجمالي الخصومات","صافي المرتب","وقت الصرف"]} />
-                    <tbody>
-                      {arch.salaries.map((s,idx)=>(
-                        <TRow key={s.id} alt={idx%2}>
-                          <TD><span style={{ fontWeight:600 }}>{s.employeeName}</span></TD>
-                          <TD mono>{fmt(s.baseSalary)}</TD>
-                          <TD mono color={C.red}>{fmt(s.totalDeductions||0)}</TD>
-                          <TD mono color={C.accent}><span style={{ fontWeight:800 }}>{fmt(s.netSalary)}</span></TD>
-                          <TD color={C.textMuted} style={{ fontSize:11 }}>{s.paidAt?fmtDateTime(s.paidAt):"—"}</TD>
-                        </TRow>
-                      ))}
-                    </tbody>
-                  </table>
-                  </div>
-                </div>
-              );
-            })
+            <Card style={{ textAlign:"center",padding:30 }}>
+              <div style={{ color:C.textMuted,fontSize:13 }}>لا توجد بيانات مرتبات لهذا الشهر.</div>
+            </Card>
+          )}
+
+          {/* سجل كل الأرشيفات السابقة */}
+          {salaryArchive.length>0 && (
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              <div style={{ fontSize:13,fontWeight:700,color:C.textMuted,marginTop:6 }}>سجل كل الأرشيفات</div>
+              {[...salaryArchive].sort((a,b)=>b.month.localeCompare(a.month)).map(arch=>{
+                const [y,m] = arch.month.split("-");
+                const label = new Date(+y,+m-1,1).toLocaleDateString("ar-EG",{month:"long",year:"numeric"});
+                return (
+                  <button key={arch.month} onClick={()=>{ setArchiveYear(y); setArchiveMonthNum(m); }}
+                    style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface2,border:`1px solid ${arch.month===archiveMonth?C.accent:C.border}`,borderRadius:11,padding:"10px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"right" }}>
+                    <span style={{ fontSize:12,fontWeight:700,color:C.text }}>📁 {label}</span>
+                    <span style={{ fontSize:11,color:C.green }}>{fmt(arch.totalNet)}</span>
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* Modals */}
       {showModal && modalType==="employee" && (
