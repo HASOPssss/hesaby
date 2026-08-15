@@ -1,255 +1,301 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import {
+  C, Ic, I, fmt, today, Card, MiniStat, Btn, Badge,
+  DatePicker, Inp, Sel, Modal, THead, TRow, TD, PageHeader,
+  usePasscodeGate, showPermissionToast,
+  validateAndBuildMovements, applyInventoryMovements,
+} from "./shared";
 
-// ─── THEME ────────────────────────────────────────────────────────────────────
-const getColors = (theme = "dark") => theme === "light" ? {
-  bg: "#f0f2f8", surface: "#ffffff", surface2: "#f5f7ff", surface3: "#eef0f8",
-  border: "#d1d5e8", borderLight: "#c8ccdf",
-  accent: "#4f5fd4", accentDim: "rgba(79,95,212,0.1)",
-  green: "#059669", greenDim: "rgba(5,150,105,0.1)",
-  red: "#dc2626", redDim: "rgba(220,38,38,0.1)",
-  yellow: "#d97706", yellowDim: "rgba(217,119,6,0.1)",
-  blue: "#2563eb", blueDim: "rgba(37,99,235,0.1)",
-  purple: "#7c3aed", purpleDim: "rgba(124,58,237,0.1)",
-  text: "#1e2240", textMuted: "#64748b", textDim: "#475569",
-} : {
-  bg: "#070810", surface: "#0e1020", surface2: "#151829", surface3: "#1c2036",
-  border: "#1e2238", borderLight: "#252a45",
-  accent: "#6c7fff", accentDim: "rgba(108,127,255,0.1)",
-  green: "#34d399", greenDim: "rgba(52,211,153,0.1)",
-  red: "#f87171", redDim: "rgba(248,113,113,0.1)",
-  yellow: "#fbbf24", yellowDim: "rgba(251,191,36,0.1)",
-  blue: "#60a5fa", blueDim: "rgba(96,165,250,0.1)",
-  purple: "#a78bfa", purpleDim: "rgba(167,139,250,0.1)",
-  text: "#e2e8f0", textMuted: "#475569", textDim: "#94a3b8",
-};
+// ══════════════════════════════════════════════════════════════════════════════
+// ReturnsPage.jsx — مرتجعات المبيعات والمشتريات (إعادة تصميم كاملة).
+//
+// المرتجع هنا مش مبلغ حر منفصل — هو دايمًا مرتبط بفاتورة حقيقية موجودة،
+// وبيتم اختيار الأصناف والكميات المرتجعة من نفس بنود الفاتورة، مع منع
+// إرجاع أكتر من "المتاح للإرجاع" (الكمية الأصلية ناقص أي مرتجع سابق لنفس
+// الصنف في نفس الفاتورة). القيمة والتأثير على المخزون بيتحسبوا تلقائيًا،
+// مش بيتكتبوا يدويًا.
+//
+// مرتجع المبيعات بيرجّع الكمية للمخزون (زي ما تكون فاتورة المبيعات نفسها
+// اتقلّلت)، ومرتجع المشتريات بيسحب الكمية من المخزون (زي ما تكون فاتورة
+// الشراء اتقلّلت) — بنفس محرك الفرق (Diff Engine) المستخدم بالظبط في صفحة
+// الفواتير، فمفيش قواعد مخزون مزدوجة في النظام.
+// ══════════════════════════════════════════════════════════════════════════════
 
-const I = {
-  returns: "M1 4v6h6M23 20v-6h-6M20.49 9A9 9 0 005.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 013.51 15",
-  plus: "M12 5v14M5 12h14",
-  trash: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6",
-  close: "M18 6L6 18M6 6l12 12",
-  alert: "M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01",
-  filter: "M22 3H2l8 9.46V19l4 2v-8.54z",
-};
-
-const Ic = ({ d, s = 16, c = "currentColor" }) => (
-  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d={d} />
-  </svg>
-);
-
-const fmt = (n) => (n ?? 0).toLocaleString("ar-EG") + " ج.م";
-const fmtDateTime = (dateStr) => {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  return `${d.toLocaleDateString("ar-EG")} — ${d.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}`;
-};
-const today = () => new Date().toISOString().split("T")[0];
-
-export default function ReturnsPage({ returns, salesInvoices, purchaseInvoices, clients, suppliers, onAdd, onDelete, theme = "dark" }) {
-  const C = getColors(theme);
-
-  const Card = ({ children, style = {} }) => (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: "20px 22px", ...style }}>{children}</div>
-  );
-  const MiniStat = ({ label, value, color, icon }) => (
-    <div style={{ background: C.surface2, borderRadius: 14, padding: "16px 18px", borderRight: `3px solid ${color}`, display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {icon && <div style={{ background: color + "18", padding: 6, borderRadius: 8 }}><Ic d={icon} s={14} c={color} /></div>}
-        <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 600 }}>{label}</span>
-      </div>
-      <div style={{ fontSize: 19, fontWeight: 800, color, fontFamily: "monospace" }}>{value}</div>
-    </div>
-  );
-  const THead = ({ cols }) => (
-    <thead><tr style={{ background: C.surface3, borderBottom: `1px solid ${C.border}` }}>
-      {cols.map(c => <th key={c} style={{ padding: "10px 14px", fontSize: 11, color: C.textMuted, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{c}</th>)}
-    </tr></thead>
-  );
-  const TRow = ({ children, alt }) => (
-    <tr style={{ borderBottom: `1px solid ${C.border}`, background: alt ? C.surface2 : "transparent" }}>{children}</tr>
-  );
-  const TD = ({ children, color, mono = false }) => (
-    <td style={{ padding: "11px 14px", fontSize: 12, color: color || C.text, fontFamily: mono ? "monospace" : "inherit" }}>{children}</td>
-  );
-  const Btn = ({ children, onClick, variant = "primary", small = false, style: s = {} }) => {
-    const v = {
-      primary: { background: C.accent, color: "#fff", border: "none" },
-      danger: { background: "transparent", color: C.red, border: `1px solid ${C.red}44` },
-      ghost: { background: "transparent", color: C.textDim, border: `1px solid ${C.border}` },
-      purple: { background: C.purpleDim, color: C.purple, border: `1px solid ${C.purple}33` },
-    };
-    return <button onClick={onClick} style={{ ...v[variant], borderRadius: 9, padding: small ? "5px 12px" : "8px 18px", fontSize: small ? 12 : 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit", ...s }}>{children}</button>;
-  };
-  const Inp = ({ label, value, onChange, type = "text", placeholder = "", required = false }) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-      {label && <label style={{ fontSize: 12, color: C.textDim, fontWeight: 600 }}>{label}{required && <span style={{ color: C.red }}> *</span>}</label>}
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 9, padding: "9px 13px", color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none" }}
-        onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border} />
-    </div>
-  );
-  const Sel = ({ label, value, onChange, options }) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-      {label && <label style={{ fontSize: 12, color: C.textDim, fontWeight: 600 }}>{label}</label>}
-      <select value={value} onChange={e => onChange(e.target.value)}
-        style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 9, padding: "9px 13px", color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none" }}>
-        <option value="">-- اختر --</option>
-        {options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
-      </select>
-    </div>
-  );
-
+function ReturnsPage({ returns=[], salesInvoices=[], purchaseInvoices=[], inventory=[], onAdd, onDelete, onAddInventoryItem, onUpdateInventoryItem, security, pageId="returns" }) {
   const [showModal, setShowModal] = useState(false);
-  const [confirm, setConfirm] = useState(null);
+  const [docType, setDocType] = useState("sales"); // "sales" | "purchases"
+  const [invoiceId, setInvoiceId] = useState("");
+  const [lines, setLines] = useState([]); // [{itemId,name,unit,price,originalQty,alreadyReturned,maxReturnable,returnQty}]
+  const [reason, setReason] = useState("");
+  const [notes, setNotes] = useState("");
+  const [shortageError, setShortageError] = useState(null); // { mode:"save"|"delete", list }
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
-  const [form, setForm] = useState({ date: today(), type: "sale", party: "", invoiceRef: "", amount: "", reason: "", notes: "" });
+  const { requestPasscode, PasscodeGate, log } = usePasscodeGate(security);
 
-  const filtered = (returns || []).filter(r => {
-    const matchSearch = !search || r.party?.includes(search) || r.id?.includes(search) || r.reason?.includes(search);
-    const matchType = !typeFilter || r.type === typeFilter;
-    return matchSearch && matchType;
-  });
-  const saleReturns = (returns || []).filter(r => r.type === "sale").reduce((s, r) => s + r.amount, 0);
-  const purchaseReturns = (returns || []).filter(r => r.type === "purchase").reduce((s, r) => s + r.amount, 0);
-  const totalReturns = filtered.reduce((s, r) => s + r.amount, 0);
-  const partyList = form.type === "sale" ? (clients || []) : (suppliers || []);
-  const invoiceList = form.type === "sale"
-    ? (salesInvoices || []).filter(i => !form.party || i.client === form.party)
-    : (purchaseInvoices || []).filter(i => !form.party || i.supplier === form.party);
+  const invoicesForType = docType === "sales" ? salesInvoices : purchaseInvoices;
+  const partyKey = docType === "sales" ? "client" : "supplier";
 
-  const handleSave = () => {
-    if (!form.party || !form.amount) return;
-    onAdd({ id: "RET" + Date.now().toString().slice(-5), ...form, amount: parseFloat(form.amount) || 0, createdAt: new Date().toISOString() });
-    setShowModal(false);
-    setForm({ date: today(), type: "sale", party: "", invoiceRef: "", amount: "", reason: "", notes: "" });
+  // ── الكمية اللي اترجعت قبل كده لكل صنف في فاتورة معينة (من كل مرتجعات الفاتورة دي) ──
+  const returnedQtyMap = (invId) => {
+    const map = new Map();
+    returns.filter(r => r.invoiceId === invId).forEach(r => {
+      (r.items||[]).forEach(it => {
+        const k = it.itemId || it.name;
+        map.set(k, (map.get(k)||0) + (parseFloat(it.qty)||0));
+      });
+    });
+    return map;
   };
 
+  const selectInvoice = (id) => {
+    setInvoiceId(id);
+    const inv = invoicesForType.find(i => i.id === id);
+    if (!inv) { setLines([]); return; }
+    const returnedMap = returnedQtyMap(id);
+    setLines((inv.items||[]).map(it => {
+      const k = it.itemId || it.name;
+      const originalQty = parseFloat(it.qty)||0;
+      const already = returnedMap.get(k) || 0;
+      const maxReturnable = Math.max(0, originalQty - already);
+      return { itemId: it.itemId, name: it.name, unit: it.unit||"قطعة", price: it.price||0, originalQty, alreadyReturned: already, maxReturnable, returnQty: 0 };
+    }));
+  };
+
+  const setLineQty = (idx, val) => {
+    setLines(prev => prev.map((l,i) => {
+      if (i!==idx) return l;
+      const q = Math.max(0, Math.min(l.maxReturnable, parseFloat(val)||0));
+      return { ...l, returnQty: q };
+    }));
+  };
+
+  const setAllToMax = () => setLines(prev => prev.map(l => ({ ...l, returnQty: l.maxReturnable })));
+  const clearAll = () => setLines(prev => prev.map(l => ({ ...l, returnQty: 0 })));
+
+  const totalReturnAmount = lines.reduce((s,l)=>s+(l.returnQty*l.price),0);
+  const selectedInvoice = invoicesForType.find(i => i.id === invoiceId);
+  const isFullReturn = lines.length>0 && lines.every(l => l.returnQty >= l.maxReturnable) && lines.some(l=>l.maxReturnable>0);
+
+  const resetForm = () => { setInvoiceId(""); setLines([]); setReason(""); setNotes(""); };
+  const openNew = () => { resetForm(); setDocType("sales"); setShowModal(true); };
+
+  const handleSave = async () => {
+    if (!invoiceId) { showPermissionToast("اختر الفاتورة أولاً", "warning"); return; }
+    const returnedLines = lines.filter(l => l.returnQty > 0);
+    if (returnedLines.length === 0) { showPermissionToast("حدّد كمية إرجاع لصنف واحد على الأقل", "warning"); return; }
+
+    const manualDiffs = returnedLines.map(l => ({ name: l.name, itemId: l.itemId, delta: -l.returnQty }));
+    const { ok, shortages, movements } = validateAndBuildMovements(docType, manualDiffs, inventory);
+    if (!ok) { setShortageError({ mode:"save", list: shortages }); return; }
+
+    const party = selectedInvoice[partyKey];
+    const record = {
+      id: "RET" + Date.now().toString().slice(-6),
+      type: docType==="sales" ? "sale" : "purchase",
+      invoiceType: docType,
+      invoiceId,
+      [partyKey]: party,
+      date: today(),
+      items: returnedLines.map(l => ({ itemId: l.itemId, name: l.name, qty: l.returnQty, price: l.price, unit: l.unit })),
+      amount: totalReturnAmount,
+      reason, notes,
+      createdAt: new Date().toISOString(),
+    };
+
+    await applyInventoryMovements(movements, {
+      type: docType, onAddInventoryItem, onUpdateInventoryItem, security,
+      invoiceLabel: `مرتجع ${docType==="sales"?"مبيعات":"مشتريات"} ${record.id} — فاتورة ${invoiceId}`,
+    });
+    await onAdd(record);
+    log({ actionType:"إضافة مرتجع", section: docType==="sales"?"مرتجعات المبيعات":"مرتجعات المشتريات", target:`${record.id} — فاتورة ${invoiceId} (${party})`, before:null, after:record });
+    showPermissionToast("تم حفظ المرتجع بنجاح", "success");
+    setShowModal(false);
+    resetForm();
+  };
+
+  // ── حذف مرتجع: عكس كامل لتأثيره على المخزون (بيتمنع لو الكمية اتستهلكت تاني) ──
+  const handleDeleteClick = (ret) => {
+    const party = ret[ret.invoiceType==="sales"||ret.type==="sale" ? "client" : "supplier"];
+    requestPasscode({
+      pageId, kind:"delete", label:`حذف مرتجع ${ret.id}`,
+      onConfirm: async () => {
+        const engineType = (ret.invoiceType || (ret.type==="sale"?"sales":"purchases"));
+        const manualDiffs = (ret.items||[]).map(it => ({ name: it.name, itemId: it.itemId, delta: it.qty }));
+        const { ok, shortages, movements } = validateAndBuildMovements(engineType, manualDiffs, inventory);
+        if (!ok) { setShortageError({ mode:"delete", list: shortages }); return; }
+        await applyInventoryMovements(movements, {
+          type: engineType, onAddInventoryItem, onUpdateInventoryItem, security,
+          invoiceLabel: `حذف مرتجع ${ret.id} — فاتورة ${ret.invoiceId}`,
+        });
+        await onDelete(ret.id);
+        log({ actionType:"حذف مرتجع", section: engineType==="sales"?"مرتجعات المبيعات":"مرتجعات المشتريات", target:`${ret.id} — فاتورة ${ret.invoiceId} (${party})`, before:ret, after:null });
+      },
+    });
+  };
+
+  const filtered = useMemo(() => returns
+    .filter(r => !typeFilter || (r.invoiceType||(r.type==="sale"?"sales":"purchases"))===typeFilter)
+    .filter(r => {
+      const party = r.client || r.supplier || "";
+      return !search.trim() || r.id.includes(search) || r.invoiceId?.includes(search) || party.includes(search);
+    })
+    .sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")),
+    [returns, typeFilter, search]);
+
+  const totalReturns = returns.reduce((s,r)=>s+(r.amount||0),0);
+  const salesReturns = returns.filter(r=>(r.invoiceType||(r.type==="sale"?"sales":"purchases"))==="sales");
+  const purchaseReturns = returns.filter(r=>(r.invoiceType||(r.type==="sale"?"sales":"purchases"))==="purchases");
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {confirm && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }}>
-          <div style={{ background: C.surface, border: `1px solid ${C.red}44`, borderRadius: 18, padding: "28px 32px", maxWidth: 380, width: "90%", textAlign: "center" }}>
-            <div style={{ width: 52, height: 52, borderRadius: "50%", background: C.redDim, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><Ic d={I.alert} s={24} c={C.red} /></div>
-            <h3 style={{ margin: "0 0 10px", fontSize: 16, fontWeight: 700, color: C.text }}>تأكيد الحذف</h3>
-            <p style={{ margin: "0 0 24px", fontSize: 13, color: C.textMuted, lineHeight: 1.7 }}>{confirm.msg}</p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button onClick={() => setConfirm(null)} style={{ background: C.surface2, color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 24px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>إلغاء</button>
-              <button onClick={() => { onDelete(confirm.id); setConfirm(null); }} style={{ background: C.red, color: "#fff", border: "none", borderRadius: 8, padding: "9px 24px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>نعم، احذف</button>
-            </div>
-          </div>
-        </div>
-      )}
+    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+      <PageHeader title="المرتجعات" icon={I.returns} subtitle={`${returns.length} مرتجع`}
+        action={<Btn onClick={openNew}><Ic d={I.plus} s={14} />مرتجع جديد</Btn>} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ background: C.purpleDim, border: `1px solid ${C.purple}33`, borderRadius: 14, padding: 12 }}><Ic d={I.returns} s={22} c={C.purple} /></div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: C.text }}>المرتجعات</h1>
-            <p style={{ margin: "4px 0 0", color: C.textMuted, fontSize: 13 }}>تسجيل وإدارة مرتجعات المبيعات والمشتريات</p>
-          </div>
-        </div>
-        <Btn onClick={() => setShowModal(true)}><Ic d={I.plus} s={15} />إضافة مرتجع</Btn>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
+        <MiniStat label="إجمالي المرتجعات" value={fmt(totalReturns)} color={C.purple} icon={I.returns} />
+        <MiniStat label="مرتجعات المبيعات" value={fmt(salesReturns.reduce((s,r)=>s+(r.amount||0),0))} color={C.red} icon={I.sales} />
+        <MiniStat label="مرتجعات المشتريات" value={fmt(purchaseReturns.reduce((s,r)=>s+(r.amount||0),0))} color={C.green} icon={I.purchase} />
+        <MiniStat label="عدد المرتجعات" value={returns.length} color={C.accent} icon={I.report} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
-        <MiniStat label="إجمالي المرتجعات" value={fmt(saleReturns + purchaseReturns)} color={C.purple} icon={I.returns} />
-        <MiniStat label="مرتجعات مبيعات" value={fmt(saleReturns)} color={C.red} icon={I.returns} />
-        <MiniStat label="مرتجعات مشتريات" value={fmt(purchaseReturns)} color={C.green} icon={I.returns} />
-      </div>
-
-      <Card style={{ padding: "14px 18px" }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث بالاسم أو رقم المرتجع..."
-            style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 13px", color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", flex: 1, minWidth: 180 }} />
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-            style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 14px", color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none" }}>
-            <option value="">كل الأنواع</option>
-            <option value="sale">مرتجع مبيعات</option>
-            <option value="purchase">مرتجع مشتريات</option>
-          </select>
-          {(search || typeFilter) && (
-            <button onClick={() => { setSearch(""); setTypeFilter(""); }}
-              style={{ background: C.redDim, color: C.red, border: `1px solid ${C.red}33`, borderRadius: 9, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>مسح</button>
-          )}
+      <Card style={{ padding:0 }}>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", padding:16, borderBottom:`1px solid ${C.border}` }}>
+          <div style={{ flex:"1 1 200px" }}>
+            <Inp label="بحث" value={search} onChange={setSearch} placeholder="رقم المرتجع، رقم الفاتورة، أو اسم الطرف..." />
+          </div>
+          <div style={{ width:180 }}>
+            <Sel label="النوع" value={typeFilter} onChange={setTypeFilter}
+              options={[{value:"sales",label:"مرتجع مبيعات"},{value:"purchases",label:"مرتجع مشتريات"}]} placeholder="كل الأنواع" />
+          </div>
         </div>
-      </Card>
-
-      <Card style={{ padding: 0 }}>
-        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>سجل المرتجعات ({filtered.length})</span>
-          {filtered.length > 0 && <span style={{ fontSize: 12, color: C.purple, fontFamily: "monospace", fontWeight: 700 }}>{fmt(totalReturns)}</span>}
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <THead cols={["رقم", "التاريخ", "النوع", "الطرف", "الفاتورة المرجعية", "المبلغ", "السبب", "ملاحظات", ""]} />
+        <div style={{ overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
+          <table style={{ width:"100%", minWidth:900, borderCollapse:"collapse" }}>
+            <THead cols={["رقم المرتجع","النوع","الفاتورة المرتبطة","الطرف","الأصناف","القيمة","التاريخ",""]} />
             <tbody>
-              {filtered.map((r, i) => (
-                <TRow key={r.id} alt={i % 2}>
-                  <TD color={C.purple}><span style={{ fontWeight: 700 }}>{r.id}</span></TD>
-                  <TD color={C.textDim}><span style={{ fontSize: 11 }}>{fmtDateTime(r.createdAt || r.date)}</span></TD>
-                  <td style={{ padding: "11px 14px" }}>
-                    <span style={{ background: r.type === "sale" ? C.redDim : C.greenDim, color: r.type === "sale" ? C.red : C.green, border: `1px solid ${r.type === "sale" ? C.red : C.green}33`, padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
-                      {r.type === "sale" ? "↩ مبيعات" : "↪ مشتريات"}
-                    </span>
-                  </td>
-                  <TD><span style={{ fontWeight: 600 }}>{r.party}</span></TD>
-                  <TD color={C.accent}>{r.invoiceRef || "—"}</TD>
-                  <TD mono color={C.purple}><span style={{ fontWeight: 700 }}>{fmt(r.amount)}</span></TD>
-                  <TD color={C.textDim}>{r.reason || "—"}</TD>
-                  <TD color={C.textMuted}><span style={{ fontSize: 11 }}>{r.notes || "—"}</span></TD>
-                  <td style={{ padding: "11px 14px" }}>
-                    <button onClick={() => setConfirm({ id: r.id, msg: `هل تريد حذف المرتجع "${r.id}"؟` })} style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted }}><Ic d={I.trash} s={14} /></button>
-                  </td>
-                </TRow>
-              ))}
+              {filtered.map((r,idx)=>{
+                const eType = r.invoiceType || (r.type==="sale"?"sales":"purchases");
+                const party = r.client || r.supplier || "—";
+                return (
+                  <TRow key={r.id} alt={idx%2}>
+                    <TD color={C.accent}>{r.id}</TD>
+                    <TD><Badge label={eType==="sales"?"مبيعات":"مشتريات"} /></TD>
+                    <TD color={C.textDim}>{r.invoiceId}</TD>
+                    <TD>{party}</TD>
+                    <TD color={C.textMuted}>{(r.items||[]).map(it=>`${it.name} ×${it.qty}`).join("، ")}</TD>
+                    <TD mono color={C.purple}><span style={{ fontWeight:700 }}>{fmt(r.amount)}</span></TD>
+                    <TD color={C.textDim}>{r.date}</TD>
+                    <td style={{ padding:"11px 14px" }}>
+                      <button onClick={()=>handleDeleteClick(r)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                    </td>
+                  </TRow>
+                );
+              })}
             </tbody>
           </table>
-          {filtered.length === 0 && (
-            <div style={{ padding: 48, textAlign: "center", color: C.textMuted }}>
-              <div style={{ background: C.purpleDim, padding: 20, borderRadius: "50%", display: "inline-flex", marginBottom: 12 }}><Ic d={I.returns} s={32} c={C.purple} /></div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>لا توجد مرتجعات</div>
-              <div style={{ fontSize: 12, marginTop: 6 }}>اضغط "إضافة مرتجع" لتسجيل أول مرتجع</div>
-            </div>
-          )}
         </div>
+        {filtered.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا توجد مرتجعات بعد</div>}
       </Card>
 
       {showModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-          <div style={{ background: C.surface, border: `1px solid ${C.borderLight}`, borderRadius: 22, padding: 28, width: "min(540px,95vw)", maxHeight: "90vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: C.text }}>تسجيل مرتجع جديد</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer", color: C.textMuted, padding: 6, display: "flex" }}><Ic d={I.close} s={16} /></button>
+        <Modal title="مرتجع جديد" onClose={()=>{setShowModal(false);resetForm();}} wide>
+          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <Sel label="نوع المستند" value={docType} onChange={v=>{ setDocType(v); setInvoiceId(""); setLines([]); }}
+                options={[{value:"sales",label:"فاتورة مبيعات"},{value:"purchases",label:"فاتورة مشتريات"}]} />
+              <Sel label="الفاتورة" value={invoiceId} onChange={selectInvoice}
+                options={invoicesForType.map(i=>({ value:i.id, label:`${i.id} — ${i[partyKey]} — ${i.date}` }))}
+                placeholder="اختر الفاتورة" />
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Inp label="التاريخ" type="date" value={form.date} onChange={v => setForm({ ...form, date: v })} />
-                <Sel label="نوع المرتجع" value={form.type} onChange={v => setForm({ ...form, type: v, party: "", invoiceRef: "" })} options={[{ value: "sale", label: "↩ مرتجع مبيعات" }, { value: "purchase", label: "↪ مرتجع مشتريات" }]} />
-                <Sel label={form.type === "sale" ? "العميل" : "المورد"} value={form.party} onChange={v => setForm({ ...form, party: v })} options={partyList.map(p => ({ value: p.name, label: p.name }))} />
-                <Sel label="الفاتورة المرجعية (اختياري)" value={form.invoiceRef} onChange={v => setForm({ ...form, invoiceRef: v })} options={invoiceList.map(i => ({ value: i.id, label: `${i.id} — ${fmt(i.amount)}` }))} />
-                <Inp label="المبلغ المرتجع (ج.م)" type="number" value={form.amount} onChange={v => setForm({ ...form, amount: v })} placeholder="0" required />
-                <Inp label="سبب الإرجاع" value={form.reason} onChange={v => setForm({ ...form, reason: v })} placeholder="مثال: منتج معيب" />
+
+            {!invoiceId && (
+              <div style={{ background:C.surface2, borderRadius:10, padding:14, fontSize:12, color:C.textMuted, textAlign:"center" }}>
+                اختر فاتورة عشان تظهر أصنافها والكميات المتاحة للإرجاع.
               </div>
-              <Inp label="ملاحظات" value={form.notes} onChange={v => setForm({ ...form, notes: v })} placeholder="أي تفاصيل إضافية..." />
-              {form.amount && (
-                <div style={{ background: C.purpleDim, border: `1px solid ${C.purple}33`, borderRadius: 12, padding: "14px 18px" }}>
-                  <div style={{ fontSize: 12, color: C.purple, fontWeight: 700, marginBottom: 6 }}>ملخص المرتجع</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                    <span style={{ color: C.textMuted }}>المبلغ المرتجع</span>
-                    <span style={{ color: C.purple, fontWeight: 800, fontFamily: "monospace" }}>{fmt(parseFloat(form.amount) || 0)}</span>
+            )}
+
+            {invoiceId && (
+              <div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                  <label style={{ fontSize:13, fontWeight:600, color:C.textDim }}>الأصناف والكميات المرتجعة</label>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <Btn small variant="ghost" onClick={clearAll}>مسح الكل</Btn>
+                    <Btn small onClick={setAllToMax}>إرجاع الفاتورة بالكامل</Btn>
                   </div>
                 </div>
-              )}
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <Btn variant="ghost" onClick={() => setShowModal(false)}>إلغاء</Btn>
-                <Btn variant="purple" onClick={handleSave}>حفظ المرتجع</Btn>
+                {lines.length === 0 ? (
+                  <div style={{ background:C.surface2, borderRadius:10, padding:14, fontSize:12, color:C.textMuted, textAlign:"center" }}>هذه الفاتورة ليس بها أصناف.</div>
+                ) : (
+                  <div style={{ background:C.surface2, borderRadius:12, overflowX:"auto", border:`1px solid ${C.border}` }}>
+                    <table style={{ width:"100%", minWidth:600, borderCollapse:"collapse" }}>
+                      <THead cols={["الصنف","الكمية الأصلية","مُرتجع سابقًا","المتاح للإرجاع","كمية الإرجاع","القيمة"]} />
+                      <tbody>
+                        {lines.map((l,i)=>(
+                          <TRow key={l.itemId||l.name} alt={i%2}>
+                            <TD>{l.name}</TD>
+                            <TD mono color={C.textDim}>{l.originalQty} {l.unit}</TD>
+                            <TD mono color={C.textMuted}>{l.alreadyReturned} {l.unit}</TD>
+                            <TD mono color={l.maxReturnable>0?C.green:C.red}>{l.maxReturnable} {l.unit}</TD>
+                            <td style={{ padding:"6px 10px" }}>
+                              <input type="number" min={0} max={l.maxReturnable} value={l.returnQty} disabled={l.maxReturnable<=0}
+                                onChange={e=>setLineQty(i, e.target.value)}
+                                style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 8px", color:C.text, fontSize:12, fontFamily:"inherit", width:80, opacity:l.maxReturnable<=0?0.5:1 }} />
+                            </td>
+                            <TD mono color={C.purple}>{fmt(l.returnQty*l.price)}</TD>
+                          </TRow>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {isFullReturn && (
+                  <div style={{ marginTop:10, background:C.purpleDim, border:`1px solid ${C.purple}33`, borderRadius:10, padding:"8px 14px", fontSize:12, color:C.purple, fontWeight:700 }}>
+                    ↩ هذا سيُسجَّل كمرتجع كامل للفاتورة
+                  </div>
+                )}
               </div>
+            )}
+
+            <Inp label="سبب الإرجاع" value={reason} onChange={setReason} placeholder="مثال: عيب في المنتج، طلب زيادة عن الحاجة..." />
+            <Inp label="ملاحظات" value={notes} onChange={setNotes} placeholder="أي ملاحظات إضافية..." />
+
+            {totalReturnAmount > 0 && (
+              <div style={{ background:C.surface3, borderRadius:12, padding:"14px 18px", display:"flex", justifyContent:"space-between" }}>
+                <span style={{ color:C.textMuted, fontWeight:700 }}>إجمالي قيمة المرتجع</span>
+                <span style={{ color:C.purple, fontWeight:800, fontFamily:"monospace", fontSize:16 }}>{fmt(totalReturnAmount)}</span>
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>{setShowModal(false);resetForm();}}>إلغاء</Btn>
+              <Btn variant="purple" onClick={handleSave}>حفظ المرتجع</Btn>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
+
+      {shortageError && (
+        <Modal title={shortageError.mode==="delete" ? "لا يمكن حذف المرتجع" : "لا يمكن حفظ المرتجع"} onClose={()=>setShortageError(null)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:13, color:C.red, fontWeight:600 }}>
+              هذا سيؤدي إلى رصيد سالب في الأصناف التالية (تم استخدام/بيع جزء من الكمية بالفعل):
+            </div>
+            {shortageError.list.map((s,i)=>(
+              <div key={i} style={{ background:C.redDim, border:`1px solid ${C.red}33`, borderRadius:10, padding:"10px 14px", display:"flex", justifyContent:"space-between", fontSize:13 }}>
+                <span style={{ fontWeight:700 }}>{s.name}</span>
+                <span style={{ color:C.textDim }}>مطلوب {s.required} — متاح {s.available}</span>
+              </div>
+            ))}
+            <div style={{ display:"flex", justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShortageError(null)}>حسنًا</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {PasscodeGate}
     </div>
   );
 }
+
+export default ReturnsPage;

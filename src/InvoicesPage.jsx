@@ -4,10 +4,19 @@ import {
   C, Ic, I, fmt, fmtDateTime, today, printInvoice,
   ConfirmDialog, usePasscodeGate, Badge, Card, MiniStat, Btn,
   DatePicker, Inp, Sel, Modal, THead, TRow, TD, PageHeader,
+  showPermissionToast, computeItemDiffs, validateAndBuildMovements, applyInventoryMovements,
 } from "./shared";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // InvoicesPage.jsx — صفحة فواتير المبيعات/المشتريات (النموذج + الجدول).
+//
+// منطق المخزون هنا شغال بمبدأ "الفرق" (Diff-based) مش "استبدال كامل" — الأدوات
+// المشتركة (computeItemDiffs / validateAndBuildMovements / applyInventoryMovements)
+// موجودة في shared.jsx عشان نفس المنطق بالظبط يُستخدم في صفحة المرتجعات كمان.
+// أي حفظ (إضافة/تعديل/حذف) بيتقارن فيه الحالة القديمة بالجديدة لكل صنف على
+// حدة، وبيتنفذ بس فرق الحركة الناتج عن كده. المبيعات بتتحقق من توفر المخزون
+// قبل أي زيادة في الكمية المباعة (تمنع البيع بدون رصيد)، والمشتريات بتتحقق
+// من عدم الوصول لرصيد سالب قبل أي نقص في الكمية المشتراة (تعديل/حذف).
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ─── INVOICE FORM ─────────────────────────────────────────────────────────────
@@ -28,7 +37,10 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickName, setQuickName] = useState("");
   const [quickPhone, setQuickPhone] = useState("");
-  const partyList = isS ? clients : suppliers;
+  const activePartyList = (isS ? clients : suppliers).filter(p=>p.isActive!==false);
+  const partyList = editingInvoice && !activePartyList.some(p=>p.name===form.party)
+    ? [...activePartyList, ...(isS?clients:suppliers).filter(p=>p.name===form.party)]
+    : activePartyList;
 
   const subtotal = items.reduce((s,it)=>s+(parseFloat(it.qty)||0)*(parseFloat(it.price)||0),0);
   const taxAmount = isS && form.taxEnabled ? subtotal*(parseFloat(form.taxRate)||0)/100 : 0;
@@ -41,7 +53,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
 
   // Handle item name typing — show matching inventory items
   const handleItemNameChange = (i, val, e) => {
-    updateItem(i, "name", val);
+    setItems(prev => prev.map((it,idx) => idx===i ? { ...it, name: val, itemId: undefined } : it));
     if (e?.target) updateDropdownPos(e.target);
     if (!(inventory||[]).length) { setItemSuggestions(prev=>({...prev,[i]:[]})); return; }
     if (!val.trim()) {
@@ -74,6 +86,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
   const selectSuggestion = (i, invItem) => {
     setItems(prev => prev.map((it,idx) => idx===i ? {
       ...it,
+      itemId: invItem.id,
       name: invItem.name,
       category: invItem.category || it.category,
       price: isS ? (invItem.price||0) : (invItem.cost||0),
@@ -107,6 +120,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
     if (onAddInventoryItem) onAddInventoryItem(newItem);
     setItems(prev => prev.map((it,idx) => idx===quickAddItemIdx ? {
       ...it,
+      itemId: newItem.id,
       name: newItem.name,
       category: newItem.category,
       price: isS ? newItem.price : newItem.cost,
@@ -125,10 +139,16 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
     setShowQuickAdd(false);
   };
 
+  // ── الحفظ هنا بيبني بيانات الفاتورة بس. التحقق من المخزون وتنفيذ حركاته
+  // (الفرق بين القديم والجديد) بيحصل في InvoicesPage نفسها، عشان يكون عندها
+  // رؤية موحدة على المخزون والفاتورة القديمة سوا قبل ما تقرر توافق على الحفظ. ──
   const handleSave = () => {
     if (!form.party||items.every(it=>!it.name)) return;
     const filledItems = items.filter(it=>it.name);
-    const isFullyPaidNow = paid >= total && total > 0;
+    // "المدفوع" مش قابل للتعديل المباشر وإحنا بنعدّل فاتورة موجودة — أي دفعة
+    // جديدة لازم تعدّي من نافذة "سداد الديون" المخصصة عشان تتسجل صح بكل تفاصيلها.
+    const paidFinal = editingInvoice ? (editingInvoice.paid||0) : paid;
+    const isFullyPaidNow = paidFinal >= total && total > 0;
     const initialPayments = (!editingInvoice && paid > 0) ? [{
       amount: paid,
       date: form.date,
@@ -143,8 +163,8 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
       items: filledItems,
       subtotal, taxRate: isS && form.taxEnabled ? parseFloat(form.taxRate)||0 : 0,
       taxAmount: isS && form.taxEnabled ? taxAmount : 0,
-      amount: total, paid,
-      status: paid >= total ? "مدفوعة" : paid > 0 ? "جزئية" : "غير مدفوعة",
+      amount: total, paid: paidFinal,
+      status: paidFinal >= total ? "مدفوعة" : paidFinal > 0 ? "جزئية" : "غير مدفوعة",
       paymentMethod: form.paymentMethod,
       checkNumber: form.checkNumber,
       checkDate: form.checkDate,
@@ -153,52 +173,6 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
       payments: initialPayments,
       paidCompletedAt: editingInvoice ? (editingInvoice.paidCompletedAt || null) : (isFullyPaidNow ? new Date().toISOString() : null),
     });
-
-    // ── تحديث المخزون (بس وقت الإنشاء، مش وقت التعديل، عشان مانكررش الخصم/الإضافة) ──
-    if (!editingInvoice && (onAddInventoryItem || onUpdateInventoryItem)) {
-      filledItems.forEach(it => {
-        if (!it.name) return;
-        const qty = parseFloat(it.qty)||0;
-        const existingItem = (inventory||[]).find(inv =>
-          inv.name?.trim().toLowerCase() === it.name.trim().toLowerCase()
-        );
-        if (isS) {
-          // مبيعات → نقص الكمية
-          if (existingItem && onUpdateInventoryItem) {
-            onUpdateInventoryItem({ ...existingItem, qty: Math.max(0, (existingItem.qty||0) - qty) });
-          }
-          // لو الصنف مش موجود في المخزون → أضفه بكمية سالب (للتنبيه)
-          else if (!existingItem && onAddInventoryItem) {
-            onAddInventoryItem({
-              id: "INV" + Date.now().toString().slice(-5) + Math.random().toString(36).slice(-3),
-              name: it.name.trim(),
-              category: it.category || "غير محدد",
-              qty: -qty,
-              minQty: 0,
-              cost: 0,
-              price: parseFloat(it.price)||0,
-              unit: "قطعة",
-            });
-          }
-        } else {
-          // مشتريات → زيادة الكمية
-          if (existingItem && onUpdateInventoryItem) {
-            onUpdateInventoryItem({ ...existingItem, qty: (existingItem.qty||0) + qty, cost: parseFloat(it.price)||existingItem.cost });
-          } else if (!existingItem && onAddInventoryItem) {
-            onAddInventoryItem({
-              id: "INV" + Date.now().toString().slice(-5) + Math.random().toString(36).slice(-3),
-              name: it.name.trim(),
-              category: it.category || "غير محدد",
-              qty,
-              minQty: 0,
-              cost: parseFloat(it.price)||0,
-              price: Math.round((parseFloat(it.price)||0) * 1.2),
-              unit: "قطعة",
-            });
-          }
-        }
-      });
-    }
   };
 
   return (
@@ -254,7 +228,17 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
             )}
           </div>
         )}
-        <Inp label={isS?"المدفوع مقدماً":"المدفوع"} type="number" value={form.paid} onChange={v=>setForm({...form,paid:v})} placeholder="0" />
+        {editingInvoice ? (
+          <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+            <label style={{ fontSize:12,color:C.textDim,fontWeight:600 }}>المدفوع</label>
+            <div style={{ background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.textDim,fontSize:13 }}>
+              {fmt(editingInvoice.paid||0)}
+            </div>
+            <span style={{ fontSize:10,color:C.textMuted }}>لتسجيل دفعة جديدة استخدم زرار "سداد الديون" من قائمة الفواتير</span>
+          </div>
+        ) : (
+          <Inp label={isS?"المدفوع مقدماً":"المدفوع"} type="number" value={form.paid} onChange={v=>setForm({...form,paid:v})} placeholder="0" />
+        )}
         <Sel label="طريقة الدفع" value={form.paymentMethod} onChange={v=>setForm({...form,paymentMethod:v})} options={[{value:"نقدي",label:"💵 نقدي"},{value:"شيك",label:"📄 شيك"},{value:"تحويل",label:"🏦 تحويل بنكي"},{value:"فيزا",label:"💳 فيزا"}]} />
         {form.paymentMethod==="شيك" && <Inp label="رقم الشيك" value={form.checkNumber} onChange={v=>setForm({...form,checkNumber:v})} placeholder="رقم الشيك..." />}
         {form.paymentMethod==="شيك" && <DatePicker label="تاريخ الشيك" value={form.checkDate} onChange={v=>setForm({...form,checkDate:v})} />}
@@ -385,7 +369,7 @@ function InvoiceForm({ type, clients, suppliers, categories, onSave, onClose, on
 }
 
 // ─── INVOICES PAGE ────────────────────────────────────────────────────────────
-function InvoicesPage({ title, invoices, type, clients, suppliers, categories, onAdd, onUpdate, onDelete, onAddClient, onAddSupplier, userEmail, inventory, onAddInventoryItem, onUpdateInventoryItem, security, pageId }) {
+function InvoicesPage({ title, invoices, type, clients, suppliers, categories, onAdd, onUpdate, onDelete, onAddClient, onAddSupplier, userEmail, inventory, onAddInventoryItem, onUpdateInventoryItem, returns=[], security, pageId }) {
   const [showModal, setShowModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState(null);
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
@@ -394,6 +378,7 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
   const [statusFilter, setStatusFilter] = useState("");
   const [payingInvoice, setPayingInvoice] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState("");
+  const [shortageError, setShortageError] = useState(null); // { list, mode: "save"|"delete" }
   const { requestPasscode, PasscodeGate, log } = usePasscodeGate(security);
 
   const filtered = invoices.filter(i=>{
@@ -406,13 +391,26 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
   const totalTax = filtered.reduce((s,i)=>s+(i.taxAmount||0),0);
 
   const sectionLabel = type==="sales"?"المبيعات":"المشتريات";
+  const invoiceWord = type==="sales"?"مبيعات":"مشتريات";
 
+  // ── حذف فاتورة: عكس كامل لتأثيرها على المخزون (كل بند بيرجع/يتشال بالكامل) ──
   const handleDelete = (inv) => {
     const party = type==="sales"?inv.client:inv.supplier;
+    const paidNote = (inv.paid||0) > 0 ? ` — تم تحصيل/دفع ${fmt(inv.paid)} منها بالفعل` : "";
     requestPasscode({
-      pageId, kind:"delete", label:`حذف فاتورة ${type==="sales"?"مبيعات":"مشتريات"}`,
-      onConfirm: () => {
-        onDelete(inv.id);
+      pageId, kind:"delete", label:`حذف فاتورة ${invoiceWord} ${inv.id}${paidNote}`,
+      onConfirm: async () => {
+        const diffs = computeItemDiffs(inv.items||[], []);
+        const { ok, shortages, movements } = validateAndBuildMovements(type, diffs, inventory||[]);
+        if (!ok) {
+          setShortageError({ mode:"delete", list: shortages });
+          return;
+        }
+        await applyInventoryMovements(movements, {
+          type, onAddInventoryItem, onUpdateInventoryItem, security,
+          invoiceLabel: `حذف فاتورة ${invoiceWord} ${inv.id} — ${party}`,
+        });
+        await onDelete(inv.id);
         log({ actionType:"حذف", section:sectionLabel, target:`فاتورة ${inv.id} — ${party}`, before: inv, after: null });
       },
     });
@@ -426,11 +424,46 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
     });
   };
 
+  // ── الحفظ الموحّد لإضافة/تعديل فاتورة: يتحقق من فرق الأصناف على المخزون،
+  // يمنع أي حالة مالية غير منطقية (تعديل ينقص الإجمالي عن المبلغ المحصّل بالفعل)،
+  // وبعدين ينفّذ حركات المخزون الفعلية قبل حفظ الفاتورة نفسها. ──
+  const processSave = async (inv, oldInvoice) => {
+    if (oldInvoice && inv.amount < (oldInvoice.paid||0) - 0.001) {
+      showPermissionToast(`لا يمكن حفظ التعديل — الإجمالي الجديد (${fmt(inv.amount)}) أقل من المبلغ المحصّل بالفعل (${fmt(oldInvoice.paid)}). راجع الأصناف أو الأسعار.`, "error");
+      return;
+    }
+    const diffs = computeItemDiffs(oldInvoice?.items||[], inv.items||[]);
+    const { ok, shortages, movements } = validateAndBuildMovements(type, diffs, inventory||[]);
+    if (!ok) {
+      setShortageError({ mode:"save", list: shortages });
+      return;
+    }
+    const party = type==="sales"?inv.client:inv.supplier;
+    await applyInventoryMovements(movements, {
+      type, onAddInventoryItem, onUpdateInventoryItem, security,
+      invoiceLabel: `فاتورة ${invoiceWord} ${inv.id} — ${party}`,
+    });
+    if (oldInvoice) {
+      await onUpdate(inv);
+      setEditingInvoice(null);
+      log({ actionType:"تعديل", section:sectionLabel, target:`فاتورة ${inv.id} — ${party}`, before:oldInvoice, after:inv });
+    } else {
+      await onAdd(inv);
+      setShowModal(false);
+      log({ actionType:"إضافة", section:sectionLabel, target:`فاتورة ${inv.id} — ${party}`, before:null, after:inv });
+    }
+  };
+
   const openPayModal = (inv) => { setPayingInvoice(inv); setPaymentAmount(""); };
+
+  const returnedAmountForInvoice = (invId) => returns
+    .filter(r => (r.invoiceType||(r.type==="sale"?"sales":"purchases"))===type && r.invoiceId===invId)
+    .reduce((s,r)=>s+(r.amount||0),0);
 
   const handleAddPayment = () => {
     if (!payingInvoice) return;
-    const remaining = payingInvoice.amount - (payingInvoice.paid||0);
+    const returnedAmt = returnedAmountForInvoice(payingInvoice.id);
+    const remaining = payingInvoice.amount - (payingInvoice.paid||0) - returnedAmt;
     const amount = parseFloat(paymentAmount) || 0;
     if (amount <= 0 || amount > remaining + 0.001) return;
     const now = new Date();
@@ -442,7 +475,7 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
     };
     const newPayments = [...(payingInvoice.payments||[]), payment];
     const newPaid = (payingInvoice.paid||0) + amount;
-    const isFullyPaid = newPaid >= payingInvoice.amount - 0.001;
+    const isFullyPaid = newPaid >= payingInvoice.amount - returnedAmt - 0.001;
     const updated = {
       ...payingInvoice,
       payments: newPayments,
@@ -475,6 +508,26 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
 
   return (
     <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
+      {shortageError && (
+        <Modal title={shortageError.mode==="delete" ? "لا يمكن حذف الفاتورة" : "لا يمكن حفظ الفاتورة"} onClose={()=>setShortageError(null)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ fontSize:13,color:C.red,fontWeight:600 }}>
+              {type==="sales"
+                ? "الكميات التالية غير متوفرة في المخزون:"
+                : "تعديل/حذف هذه الفاتورة سيؤدي إلى رصيد سالب في الأصناف التالية (تم استخدام جزء من الكمية بالفعل):"}
+            </div>
+            {shortageError.list.map((s,i)=>(
+              <div key={i} style={{ background:C.redDim,border:`1px solid ${C.red}33`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",fontSize:13 }}>
+                <span style={{ fontWeight:700 }}>{s.name}</span>
+                <span style={{ color:C.textDim }}>مطلوب {s.required} — متاح {s.available}</span>
+              </div>
+            ))}
+            <div style={{ display:"flex",justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setShortageError(null)}>حسنًا</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
       {PasscodeGate}
       {showAddPartyModal && (
         <Modal title={isS?"إضافة عميل جديد":"إضافة مورد جديد"} onClose={()=>setShowAddPartyModal(false)}>
@@ -519,7 +572,12 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
             <tbody>
               {filtered.map((inv,idx)=>{
                 const party = type==="sales"?inv.client:inv.supplier;
-                const remaining = inv.amount-inv.paid;
+                const invReturns = returns.filter(r=>(r.invoiceType||(r.type==="sale"?"sales":"purchases"))===type && r.invoiceId===inv.id);
+                const returnedAmount = invReturns.reduce((s,r)=>s+(r.amount||0),0);
+                const remaining = inv.amount - inv.paid - returnedAmount;
+                const originalQtyTotal = (inv.items||[]).reduce((s,it)=>s+(parseFloat(it.qty)||0),0);
+                const returnedQtyTotal = invReturns.reduce((s,r)=>s+(r.items||[]).reduce((s2,it)=>s2+(parseFloat(it.qty)||0),0),0);
+                const returnLabel = returnedAmount<=0 ? null : (returnedQtyTotal>=originalQtyTotal ? "مرتجع بالكامل" : "مرتجع جزئي");
                 const itemNames = (inv.items||[]).map(it=>it.name).filter(Boolean).join("، ");
                 return (
                   <TRow key={inv.id} alt={idx%2}>
@@ -536,9 +594,14 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
                         {inv.paymentMethod==="شيك"&&inv.checkNumber?` #${inv.checkNumber}`:""}
                       </span>
                     </td>
-                    <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
                     <td style={{ padding:"11px 14px" }}>
-                      <button onClick={()=>printInvoice(inv,type)} title="طباعة" style={{ background:"none",border:"none",cursor:"pointer",color:C.blue }}><Ic d={I.print} s={14} /></button>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        <Badge label={inv.status} />
+                        {returnLabel && <span style={{ fontSize:10,fontWeight:700,color:C.purple,background:C.purpleDim,border:`1px solid ${C.purple}33`,borderRadius:20,padding:"2px 8px" }}>↩ {returnLabel}</span>}
+                      </div>
+                    </td>
+                    <td style={{ padding:"11px 14px" }}>
+                      <button onClick={()=>printInvoice(inv,type,invReturns)} title="طباعة" style={{ background:"none",border:"none",cursor:"pointer",color:C.blue }}><Ic d={I.print} s={14} /></button>
                     </td>
                     <td style={{ padding:"11px 14px" }}>
                       <div style={{ display:"flex",gap:6,alignItems:"center" }}>
@@ -562,20 +625,20 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
       {showModal && (
         <Modal title={`فاتورة ${type==="sales"?"مبيعات":"مشتريات"} جديدة`} onClose={()=>setShowModal(false)} wide>
           <InvoiceForm type={type} clients={clients} suppliers={suppliers} categories={categories}
-            onSave={inv=>{ onAdd(inv); setShowModal(false); log({ actionType:"إضافة", section:sectionLabel, target:`فاتورة ${inv.id} — ${type==="sales"?inv.client:inv.supplier}`, before:null, after:inv }); }} onClose={()=>setShowModal(false)}
+            onSave={inv=>processSave(inv, null)} onClose={()=>setShowModal(false)}
             onAddClient={onAddClient} onAddSupplier={onAddSupplier}
             inventory={inventory||[]}
-            onAddInventoryItem={onAddInventoryItem}
-            onUpdateInventoryItem={onUpdateInventoryItem} />
+            onAddInventoryItem={onAddInventoryItem} />
         </Modal>
       )}
       {editingInvoice && (
         <Modal title={`تعديل فاتورة ${type==="sales"?"مبيعات":"مشتريات"}`} onClose={()=>setEditingInvoice(null)} wide>
           <InvoiceForm type={type} clients={clients} suppliers={suppliers} categories={categories}
             editingInvoice={editingInvoice}
-            onSave={inv=>{ onUpdate(inv); setEditingInvoice(null); log({ actionType:"تعديل", section:sectionLabel, target:`فاتورة ${inv.id} — ${type==="sales"?inv.client:inv.supplier}`, before:editingInvoice, after:inv }); }} onClose={()=>setEditingInvoice(null)}
+            onSave={inv=>processSave(inv, editingInvoice)} onClose={()=>setEditingInvoice(null)}
             onAddClient={onAddClient} onAddSupplier={onAddSupplier}
-            inventory={inventory||[]} />
+            inventory={inventory||[]}
+            onAddInventoryItem={onAddInventoryItem} />
         </Modal>
       )}
       {payingInvoice && (
@@ -584,7 +647,7 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
             <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10 }}>
               <MiniStat label="إجمالي الفاتورة" value={fmt(payingInvoice.amount)} color={C.accent} />
               <MiniStat label="المدفوع" value={fmt(payingInvoice.paid||0)} color={C.green} />
-              <MiniStat label="المتبقي" value={fmt(payingInvoice.amount-(payingInvoice.paid||0))} color={C.red} />
+              <MiniStat label="المتبقي" value={fmt(payingInvoice.amount-(payingInvoice.paid||0)-returnedAmountForInvoice(payingInvoice.id))} color={C.red} />
             </div>
 
             {(payingInvoice.payments||[]).length > 0 && (
@@ -608,10 +671,10 @@ function InvoicesPage({ title, invoices, type, clients, suppliers, categories, o
               </div>
             )}
 
-            {payingInvoice.amount - (payingInvoice.paid||0) > 0.001 ? (
+            {payingInvoice.amount - (payingInvoice.paid||0) - returnedAmountForInvoice(payingInvoice.id) > 0.001 ? (
               <div style={{ display:"flex",gap:10,alignItems:"flex-end" }}>
                 <div style={{ flex:1 }}>
-                  <Inp label="قيمة الدفعة الجديدة" type="number" value={paymentAmount} onChange={setPaymentAmount} placeholder={`الحد الأقصى ${fmt(payingInvoice.amount-(payingInvoice.paid||0))}`} />
+                  <Inp label="قيمة الدفعة الجديدة" type="number" value={paymentAmount} onChange={setPaymentAmount} placeholder={`الحد الأقصى ${fmt(payingInvoice.amount-(payingInvoice.paid||0)-returnedAmountForInvoice(payingInvoice.id))}`} />
                 </div>
                 <Btn variant="success" onClick={handleAddPayment}><Ic d={I.money} s={13} />تسجيل الدفعة</Btn>
               </div>

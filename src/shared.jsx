@@ -218,6 +218,11 @@ function useAppData(userId) {
       await saveData("clients", record);
       setData(prev => ({ ...prev, clients: [...prev.clients, record] }));
     },
+    updateClient: async (client) => {
+      const record = { ...client, type: "client" };
+      await saveData("clients", record);
+      setData(prev => ({ ...prev, clients: prev.clients.map(c => c.id === client.id ? record : c) }));
+    },
     deleteClient: async (name) => {
       setData(prev => {
         const client = prev.clients.find(c => c.name === name);
@@ -229,6 +234,11 @@ function useAppData(userId) {
       const record = { ...supplier, type: "supplier" };
       await saveData("suppliers", record);
       setData(prev => ({ ...prev, suppliers: [...prev.suppliers, record] }));
+    },
+    updateSupplier: async (supplier) => {
+      const record = { ...supplier, type: "supplier" };
+      await saveData("suppliers", record);
+      setData(prev => ({ ...prev, suppliers: prev.suppliers.map(s => s.id === supplier.id ? record : s) }));
     },
     deleteSupplier: async (name) => {
       setData(prev => {
@@ -611,7 +621,7 @@ const getCompanyBranding = () => {
   } catch { return { name:"حسابي Pro", logo:"" }; }
 };
 
-const printInvoice = (inv, type) => {
+const printInvoice = (inv, type, invoiceReturns = []) => {
   const { name: companyName, logo: companyLogo } = getCompanyBranding();
   const party = type === "sales" ? inv.client : inv.supplier;
   const partyLabel = type === "sales" ? "العميل" : "المورد";
@@ -619,11 +629,22 @@ const printInvoice = (inv, type) => {
   const logoHtml = companyLogo ? `<img src="${companyLogo}" style="width:60px;height:60px;object-fit:cover;border-radius:10px;margin-left:12px" />` : "";
   const printDateTime = new Date().toLocaleString("ar-EG", { year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" });
   const invDateTime = inv.createdAt ? new Date(inv.createdAt).toLocaleString("ar-EG", { year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }) : inv.date;
+  const totalReturnedAmount = invoiceReturns.reduce((s,r)=>s+(r.amount||0), 0);
+  const returnedQtyByItem = {};
+  invoiceReturns.forEach(r => (r.items||[]).forEach(it => {
+    const k = it.itemId || it.name;
+    returnedQtyByItem[k] = (returnedQtyByItem[k]||0) + (parseFloat(it.qty)||0);
+  }));
+  const originalQtyTotal = (inv.items||[]).reduce((s,it)=>s+(parseFloat(it.qty)||0),0);
+  const returnedQtyTotal = Object.values(returnedQtyByItem).reduce((s,q)=>s+q,0);
+  const returnStatus = totalReturnedAmount<=0 ? null : (returnedQtyTotal >= originalQtyTotal ? "مرتجع بالكامل" : "مرتجع جزئي");
+  const effectiveRemaining = (inv.amount - (inv.paid||0)) - totalReturnedAmount;
   const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${title}</title>
   <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Cairo','Segoe UI',sans-serif;background:#fff;color:#1a1a2e;padding:40px}
   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:30px;padding-bottom:20px;border-bottom:3px solid #6c7fff}
   .company-info{display:flex;align-items:center}.company{font-size:24px;font-weight:800;color:#6c7fff}.invoice-num{font-size:20px;font-weight:800}
   .badge{display:inline-block;background:#f0f4ff;color:#6c7fff;border:1px solid #c7d2fe;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700;margin-top:6px}
+  .badge-return{display:inline-block;background:#faf5ff;color:#9333ea;border:1px solid #e9d5ff;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700;margin-top:6px;margin-right:6px}
   .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:30px}
   .info-box{background:#f8faff;border:1px solid #e2e8f0;border-radius:10px;padding:16px}
   .info-label{font-size:11px;color:#64748b;font-weight:600;margin-bottom:4px}.info-value{font-size:15px;font-weight:700}
@@ -633,6 +654,7 @@ const printInvoice = (inv, type) => {
   .totals{background:#f8faff;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;max-width:300px;margin-right:auto}
   .total-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
   .total-row.main{font-size:16px;font-weight:800;color:#6c7fff;border-top:2px solid #c7d2fe;margin-top:8px;padding-top:10px}
+  .returns-table thead tr{background:#9333ea}.returns-table tbody tr:nth-child(even){background:#faf5ff}
   .footer{margin-top:40px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:16px}
   .pay-table{margin-top:10px}.pay-table thead tr{background:#94a3b8}
   .status-banner{margin-top:20px;text-align:center;padding:14px;border-radius:10px;font-size:15px;font-weight:800}
@@ -641,7 +663,7 @@ const printInvoice = (inv, type) => {
   @media print{body{padding:20px}}</style></head><body>
   <div class="header">
     <div class="company-info">${logoHtml}<div><div class="company">${companyName}</div></div></div>
-    <div><div style="font-size:13px;color:#64748b">${title}</div><div class="invoice-num">${inv.id}</div><span class="badge">${inv.status}</span></div>
+    <div><div style="font-size:13px;color:#64748b">${title}</div><div class="invoice-num">${inv.id}</div><span class="badge">${inv.status}</span>${returnStatus?`<span class="badge-return">↩ ${returnStatus}</span>`:""}</div>
   </div>
   <div class="info-grid"><div class="info-box"><div class="info-label">${partyLabel}</div><div class="info-value">${party}</div></div>
   <div class="info-box"><div class="info-label">تاريخ ووقت الفاتورة</div><div class="info-value">${invDateTime}</div></div>
@@ -651,19 +673,27 @@ const printInvoice = (inv, type) => {
   <table><thead><tr><th>الصنف</th><th>الفئة</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>
   ${(inv.items||[]).map(it=>`<tr><td>${it.name||"—"}</td><td>${it.category||"—"}</td><td>${it.qty}</td><td>${(it.price||0).toLocaleString("ar-EG")} ج.م</td><td>${((it.qty||0)*(it.price||0)).toLocaleString("ar-EG")} ج.م</td></tr>`).join("")}
   </tbody></table>
+  ${invoiceReturns.length>0?`
+  <div style="font-size:14px;font-weight:800;margin:0 0 10px;color:#9333ea">↩ ملخص المرتجعات (${invoiceReturns.length})</div>
+  <table class="returns-table"><thead><tr><th>رقم المرتجع</th><th>التاريخ</th><th>الأصناف المرتجعة</th><th>السبب</th><th>القيمة</th></tr></thead><tbody>
+  ${invoiceReturns.map(r=>`<tr><td>${r.id}</td><td>${r.date||"—"}</td><td>${(r.items||[]).map(it=>`${it.name} × ${it.qty}`).join("، ")}</td><td>${r.reason||"—"}</td><td>${(r.amount||0).toLocaleString("ar-EG")} ج.م</td></tr>`).join("")}
+  </tbody></table>
+  <div style="text-align:left;font-weight:800;color:#9333ea;font-size:13px;margin-bottom:20px">إجمالي المرتجعات: ${totalReturnedAmount.toLocaleString("ar-EG")} ج.م</div>
+  `:""}
   <div class="totals">
   <div class="total-row"><span>قبل الضريبة</span><span>${(inv.subtotal||inv.amount).toLocaleString("ar-EG")} ج.م</span></div>
   <div class="total-row"><span>ضريبة ${inv.taxRate||0}%</span><span>${(inv.taxAmount||0).toLocaleString("ar-EG")} ج.م</span></div>
   <div class="total-row"><span>المدفوع</span><span>${(inv.paid||0).toLocaleString("ar-EG")} ج.م</span></div>
-  <div class="total-row"><span>المتبقي</span><span>${(inv.amount-inv.paid).toLocaleString("ar-EG")} ج.م</span></div>
+  ${totalReturnedAmount>0?`<div class="total-row"><span>قيمة المرتجعات</span><span>- ${totalReturnedAmount.toLocaleString("ar-EG")} ج.م</span></div>`:""}
+  <div class="total-row"><span>المتبقي بعد المرتجعات</span><span>${effectiveRemaining.toLocaleString("ar-EG")} ج.م</span></div>
   <div class="total-row main"><span>الإجمالي الكلي</span><span>${inv.amount.toLocaleString("ar-EG")} ج.م</span></div></div>
   ${(inv.payments&&inv.payments.length>0)?`
   <div style="font-size:14px;font-weight:800;margin:24px 0 10px">سجل الدفعات</div>
   <table class="pay-table"><thead><tr><th>#</th><th>قيمة الدفعة</th><th>التاريخ</th><th>الوقت</th><th>سجلها</th></tr></thead><tbody>
   ${inv.payments.map((p,idx)=>`<tr><td>${idx+1}</td><td>${(p.amount||0).toLocaleString("ar-EG")} ج.م</td><td>${p.date||"—"}</td><td>${p.time||"—"}</td><td>${p.by||"—"}</td></tr>`).join("")}
   </tbody></table>`:""}
-  <div class="status-banner ${(inv.paid>=inv.amount)?"status-paid":"status-unpaid"}">
-  ${(inv.paid>=inv.amount)?`✅ تم السداد بالكامل${inv.paidCompletedAt?" بتاريخ "+new Date(inv.paidCompletedAt).toLocaleString("ar-EG",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):""}`:`⚠️ لم يتم السداد بالكامل — المتبقي ${(inv.amount-(inv.paid||0)).toLocaleString("ar-EG")} ج.م`}
+  <div class="status-banner ${(effectiveRemaining<=0)?"status-paid":"status-unpaid"}">
+  ${(effectiveRemaining<=0)?`✅ تم السداد بالكامل${inv.paidCompletedAt?" بتاريخ "+new Date(inv.paidCompletedAt).toLocaleString("ar-EG",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):""}`:`⚠️ لم يتم السداد بالكامل — المتبقي ${effectiveRemaining.toLocaleString("ar-EG")} ج.م`}
   </div>
   <div class="footer">${companyName} — طُبعت بتاريخ ${printDateTime} — hesapy.pro</div>
   </body></html>`;
@@ -1060,6 +1090,104 @@ const logInventoryMovement = async (ownerId, { itemId, itemName, movementType, q
       created_at: new Date().toISOString(),
     });
   } catch { /* تجاهل أي خطأ عشان ميوقفش العملية الأساسية */ }
+};
+
+// ─── محرك حركة المخزون بمبدأ "الفرق" (Diff-based) — مشترك بين فواتير
+// المبيعات/المشتريات وصفحة المرتجعات، عشان يشتغلوا بنفس القواعد بالظبط. ───
+//
+// مفتاح ثابت لكل بند — بيفضل معرّف الصنف (itemId) لو موجود، وبيرجع لمطابقة
+// الاسم (نص، Case-insensitive) للسجلات القديمة اللي اتسجلت قبل ما نبدأ نخزّن
+// itemId مع كل بند.
+const itemKey = (it) => it.itemId || `name:${(it.name||"").trim().toLowerCase()}`;
+
+// يقارن حالة قديمة (oldItems) وجديدة (newItems) لبنود صنف، ويرجّع الفرق
+// الصافي في الكمية لكل صنف اتغيّر بس (delta = newQty - oldQty). بند اتشال
+// بالكامل بيبقى delta = -oldQty، وبند جديد اتضاف بيبقى delta = +newQty.
+const computeItemDiffs = (oldItems = [], newItems = []) => {
+  const map = new Map();
+  oldItems.forEach(it => {
+    const k = itemKey(it);
+    map.set(k, { key: k, itemId: it.itemId, name: it.name, oldQty: parseFloat(it.qty) || 0, newQty: 0 });
+  });
+  newItems.forEach(it => {
+    const k = itemKey(it);
+    const existing = map.get(k) || { key: k, itemId: it.itemId, name: it.name, oldQty: 0, newQty: 0 };
+    existing.newQty = parseFloat(it.qty) || 0;
+    existing.itemId = it.itemId || existing.itemId;
+    existing.name = it.name || existing.name;
+    map.set(k, existing);
+  });
+  return [...map.values()]
+    .map(d => ({ ...d, delta: d.newQty - d.oldQty }))
+    .filter(d => Math.abs(d.delta) > 0.00001);
+};
+
+// يتحقق من كل فرق قبل تنفيذه، ويبني قائمة الحركات المطلوبة على المخزون.
+// type: "sales" أو "purchases" — دي نوع المستند "الأصلي" اللي الفرق مبني
+// عليه (مرتجع مبيعات بيتعامل كـ "نقص في كمية فاتورة مبيعات"، فبيستخدم نفس
+// قواعد "sales"، ومرتجع مشتريات بيستخدم نفس قواعد "purchases").
+// مبيعات: زيادة الكمية (delta>0) لازم تكون متاحة في المخزون، وإلا تُمنع.
+// مشتريات: نقص الكمية (delta<0) لازم مايودّيش الرصيد لسالب، وإلا تُمنع.
+const validateAndBuildMovements = (type, diffs, inventory) => {
+  const isSales = type === "sales";
+  const shortages = [];
+  const movements = [];
+  for (const d of diffs) {
+    const invItem = d.itemId
+      ? inventory.find(i => i.id === d.itemId)
+      : inventory.find(i => i.name?.trim().toLowerCase() === (d.name || "").trim().toLowerCase());
+    const currentQty = invItem?.qty || 0;
+
+    if (isSales) {
+      if (d.delta > 0 && (!invItem || currentQty < d.delta)) {
+        shortages.push({ name: d.name, required: d.delta, available: invItem ? currentQty : 0 });
+        continue;
+      }
+      movements.push({ invItem, name: d.name, qtyChange: -d.delta });
+    } else {
+      if (d.delta < 0 && currentQty + d.delta < -0.00001) {
+        shortages.push({ name: d.name, required: Math.abs(d.delta), available: currentQty, isPurchaseReduction: true });
+        continue;
+      }
+      movements.push({ invItem, name: d.name, qtyChange: d.delta });
+    }
+  }
+  return { ok: shortages.length === 0, shortages, movements };
+};
+
+// ينفّذ فعليًا كل حركة مخزون معتمدة، ويسجّلها في سجل حركة المخزون.
+const applyInventoryMovements = async (movements, { type, onAddInventoryItem, onUpdateInventoryItem, invoiceLabel, security }) => {
+  for (const m of movements) {
+    if (Math.abs(m.qtyChange) < 0.00001) continue;
+    if (m.invItem) {
+      const before = m.invItem.qty || 0;
+      const after = before + m.qtyChange;
+      await onUpdateInventoryItem({ ...m.invItem, qty: after });
+      if (security) {
+        await logInventoryMovement(security.ownerId, {
+          itemId: m.invItem.id, itemName: m.invItem.name,
+          movementType: m.qtyChange >= 0 ? "in" : "out",
+          qty: Math.abs(m.qtyChange), balanceBefore: before, balanceAfter: after,
+          reason: invoiceLabel, userName: security.userLabel, fullName: security.userLabel,
+        });
+      }
+    } else if (type === "purchases" && m.qtyChange > 0) {
+      // مادة جديدة جاية من فاتورة شراء ملهاش سجل مخزون قبل كده
+      const newItem = {
+        id: "INV" + Date.now().toString().slice(-5) + Math.random().toString(36).slice(-3),
+        name: m.name, category: "غير محدد", qty: m.qtyChange, minQty: 0, cost: 0, price: 0, unit: "قطعة",
+      };
+      await onAddInventoryItem(newItem);
+      if (security) {
+        await logInventoryMovement(security.ownerId, {
+          itemId: newItem.id, itemName: newItem.name, movementType: "in",
+          qty: m.qtyChange, balanceBefore: 0, balanceAfter: m.qtyChange,
+          reason: `${invoiceLabel} — صنف جديد`, userName: security.userLabel, fullName: security.userLabel,
+        });
+      }
+    }
+    // مبيعات وصنف مش موجود أصلًا بيتمنع من الأساس في مرحلة التحقق (validateAndBuildMovements)
+  }
 };
 
 
@@ -1808,6 +1936,7 @@ export {
   openPrint, getCompanyBranding, printInvoice, printTaxInvoice, printStocktakeReport, printStocktakeUpdateReport, printFinancialReport,
   downloadInventoryTemplate, parseInventoryCSV,
   PasswordDialog, PasscodeDialog, getCachedPasscode, setCachedPasscode, logActivity, logInventoryMovement, usePasscodeGate,
+  computeItemDiffs, validateAndBuildMovements, applyInventoryMovements,
   ConfirmDialog, Badge, Card, GlowCard, MiniStat, Btn,
   DatePicker, MonthPicker, Inp, Sel, Modal, THead, TRow, TD,
   PageHeader, ProgressBar, SectionTitle, ADMIN_EMAIL, Logo,

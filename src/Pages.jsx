@@ -145,26 +145,74 @@ function Dashboard({ data, daysUntilExpiry, inventory }) {
 }
 
 // ─── ACCOUNT STATEMENT (العملاء والموردين) ────────────────────────────────────
-function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, security, pageId, userEmail }) {
+function AccountStatement({ parties, invoices, returns=[], type, onAddParty, onUpdateParty, onDeleteParty, security, pageId, userEmail }) {
   const isMobile = useIsMobile();
   const [selected, setSelected] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ name:"",phone:"" });
+  const [showArchived, setShowArchived] = useState(false);
   const { requestPasscode, PasscodeGate, log } = usePasscodeGate(security);
   const key = type==="client"?"client":"supplier";
   const isClient = type==="client";
+  const engineType = isClient ? "sales" : "purchases";
 
   const getStmt = name=>invoices.filter(i=>i[key]===name);
+  // مبلغ المرتجعات المرتبط بكل فواتير الطرف ده — بيتخصم من الرصيد المستحق
+  const returnedAmountFor = (invIds) => returns
+    .filter(r => (r.invoiceType||(r.type==="sale"?"sales":"purchases"))===engineType && invIds.includes(r.invoiceId))
+    .reduce((s,r)=>s+(r.amount||0),0);
+  const balanceFor = (name) => {
+    const stmt = getStmt(name);
+    const totalAmt = stmt.reduce((s,i)=>s+i.amount,0);
+    const totalPaid = stmt.reduce((s,i)=>s+i.paid,0);
+    const returned = returnedAmountFor(stmt.map(i=>i.id));
+    return totalAmt - totalPaid - returned;
+  };
+  const activeParties = parties.filter(p=>p.isActive!==false);
+  const archivedParties = parties.filter(p=>p.isActive===false);
+  const visibleParties = showArchived ? archivedParties : activeParties;
   const sel = parties.find(p=>p.name===selected);
   const stmt = selected?getStmt(selected):[];
   const totalAmt = stmt.reduce((s,i)=>s+i.amount,0);
   const totalPaid = stmt.reduce((s,i)=>s+i.paid,0);
-  const balance = totalAmt-totalPaid;
+  const totalReturned = selected ? returnedAmountFor(stmt.map(i=>i.id)) : 0;
+  const balance = totalAmt-totalPaid-totalReturned;
 
   const handleAddParty = () => {
     if (!addForm.name.trim()) return;
-    onAddParty({ id:(isClient?"C":"SP")+Date.now().toString().slice(-5),name:addForm.name.trim(),phone:addForm.phone.trim(),balance:0 });
+    onAddParty({ id:(isClient?"C":"SP")+Date.now().toString().slice(-5),name:addForm.name.trim(),phone:addForm.phone.trim(),balance:0,isActive:true });
     setAddForm({ name:"",phone:"" }); setShowAddModal(false);
+  };
+
+  // حذف حقيقي مسموح بس لو مفيش أي فاتورة مرتبطة بالطرف ده تاريخيًا. لو عنده
+  // فواتير، "الحذف" بيتحول تلقائيًا لأرشفة — الطرف بيختفي من القوائم النشطة
+  // لكن كل فواتيره وتقاريره التاريخية تفضل سليمة تمامًا، وممكن استعادته لاحقًا.
+  const handleDeleteOrArchive = (p) => {
+    const hasHistory = getStmt(p.name).length > 0;
+    requestPasscode({
+      pageId, kind:"delete",
+      label: hasHistory ? `أرشفة ${isClient?"عميل":"مورد"} له سجل فواتير` : `حذف ${isClient?"عميل":"مورد"}`,
+      onConfirm: () => {
+        if (hasHistory) {
+          onUpdateParty({ ...p, isActive:false });
+          log({ actionType:"أرشفة", section:isClient?"العملاء":"الموردين", target:p.name, before:p, after:{...p,isActive:false} });
+        } else {
+          onDeleteParty(p.name);
+          log({ actionType:"حذف", section:isClient?"العملاء":"الموردين", target:p.name, before:p, after:null });
+        }
+        if (selected===p.name) setSelected(null);
+      },
+    });
+  };
+
+  const handleReactivate = (p) => {
+    requestPasscode({
+      pageId, kind:"edit", label:`استعادة ${isClient?"عميل":"مورد"} من الأرشيف`,
+      onConfirm: () => {
+        onUpdateParty({ ...p, isActive:true });
+        log({ actionType:"استعادة من الأرشيف", section:isClient?"العملاء":"الموردين", target:p.name, before:p, after:{...p,isActive:true} });
+      },
+    });
   };
 
   return (
@@ -187,22 +235,33 @@ function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, 
       )}
       <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"260px 1fr",gap:18,alignItems:"start" }}>
         <Card style={{ padding:0 }}>
-          <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:11,fontWeight:700,color:C.textMuted,letterSpacing:0.5 }}>
-            قائمة {isClient?"العملاء":"الموردين"} ({parties.length})
+          <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ fontSize:11,fontWeight:700,color:C.textMuted,letterSpacing:0.5 }}>
+              {showArchived ? `المؤرشفون (${archivedParties.length})` : `قائمة ${isClient?"العملاء":"الموردين"} (${activeParties.length})`}
+            </span>
+            {archivedParties.length > 0 && (
+              <button onClick={()=>setShowArchived(s=>!s)} style={{ background:"none",border:"none",cursor:"pointer",color:C.accent,fontSize:11,fontWeight:700,fontFamily:"inherit" }}>
+                {showArchived ? "عرض النشطين" : `الأرشيف (${archivedParties.length})`}
+              </button>
+            )}
           </div>
-          {parties.map(p=>{
-            const bal = getStmt(p.name).reduce((s,i)=>s+(i.amount-i.paid),0);
+          {visibleParties.map(p=>{
+            const bal = balanceFor(p.name);
             return (
-              <div key={p.id} onClick={()=>setSelected(p.name)} style={{ padding:"12px 16px",cursor:"pointer",borderBottom:`1px solid ${C.border}10`,background:selected===p.name?C.accentDim:"transparent",borderRight:`3px solid ${selected===p.name?C.accent:"transparent"}`,display:"flex",justifyContent:"space-between",alignItems:"center",transition:"all 0.15s" }}>
+              <div key={p.id} onClick={()=>setSelected(p.name)} style={{ padding:"12px 16px",cursor:"pointer",borderBottom:`1px solid ${C.border}10`,background:selected===p.name?C.accentDim:"transparent",borderRight:`3px solid ${selected===p.name?C.accent:"transparent"}`,display:"flex",justifyContent:"space-between",alignItems:"center",transition:"all 0.15s",opacity:showArchived?0.7:1 }}>
                 <div>
                   <div style={{ fontSize:13,fontWeight:600,color:C.text }}>{p.name}</div>
                   <div style={{ fontSize:11,color:bal>0?C.red:C.green,marginTop:2,fontFamily:"monospace" }}>{bal>0?`مديون: ${fmt(bal)}`:"✓ مسدد"}</div>
                 </div>
-                <button onClick={e=>{ e.stopPropagation(); requestPasscode({ pageId, kind:"delete", label:`حذف ${isClient?"عميل":"مورد"}`, onConfirm: () => { onDeleteParty(p.name); if(selected===p.name)setSelected(null); log({ actionType:"حذف", section:isClient?"العملاء":"الموردين", target:p.name, before:p, after:null }); } }); }} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted,opacity:0.5 }}><Ic d={I.trash} s={12} /></button>
+                {showArchived ? (
+                  <button onClick={e=>{ e.stopPropagation(); handleReactivate(p); }} title="استعادة" style={{ background:C.greenDim,color:C.green,border:`1px solid ${C.green}33`,borderRadius:7,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>استعادة</button>
+                ) : (
+                  <button onClick={e=>{ e.stopPropagation(); handleDeleteOrArchive(p); }} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted,opacity:0.5 }}><Ic d={I.trash} s={12} /></button>
+                )}
               </div>
             );
           })}
-          {parties.length===0 && <div style={{ padding:24,textAlign:"center",color:C.textMuted,fontSize:12 }}>لا يوجد {isClient?"عملاء":"موردون"}</div>}
+          {visibleParties.length===0 && <div style={{ padding:24,textAlign:"center",color:C.textMuted,fontSize:12 }}>{showArchived ? "لا يوجد مؤرشفون" : `لا يوجد ${isClient?"عملاء":"موردون"}`}</div>}
         </Card>
         <div>
           {selected ? (
@@ -230,19 +289,24 @@ function AccountStatement({ parties, invoices, type, onAddParty, onDeleteParty, 
               <Card style={{ padding:0 }}>
                 <div style={{ padding:"12px 16px",borderBottom:`1px solid ${C.border}`,fontSize:13,fontWeight:700,color:C.text }}>سجل الفواتير</div>
                 <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
-                <table style={{ width:"100%",minWidth:560,borderCollapse:"collapse" }}>
-                  <THead cols={["رقم الفاتورة","التاريخ","الإجمالي","المدفوع","المتبقي","الحالة"]} />
+                <table style={{ width:"100%",minWidth:640,borderCollapse:"collapse" }}>
+                  <THead cols={["رقم الفاتورة","التاريخ","الإجمالي","المدفوع","مرتجعات","المتبقي","الحالة"]} />
                   <tbody>
-                    {stmt.map((inv,i)=>(
-                      <TRow key={inv.id} alt={i%2}>
-                        <TD color={C.accent}>{inv.id}</TD>
-                        <TD color={C.textDim}>{inv.date}</TD>
-                        <TD mono>{fmt(inv.amount)}</TD>
-                        <TD mono color={C.green}>{fmt(inv.paid)}</TD>
-                        <TD mono color={(inv.amount-inv.paid)>0?C.red:C.textMuted}>{fmt(inv.amount-inv.paid)}</TD>
-                        <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
-                      </TRow>
-                    ))}
+                    {stmt.map((inv,i)=>{
+                      const invReturned = returns.filter(r=>(r.invoiceType||(r.type==="sale"?"sales":"purchases"))===engineType && r.invoiceId===inv.id).reduce((s,r)=>s+(r.amount||0),0);
+                      const remaining = inv.amount - inv.paid - invReturned;
+                      return (
+                        <TRow key={inv.id} alt={i%2}>
+                          <TD color={C.accent}>{inv.id}</TD>
+                          <TD color={C.textDim}>{inv.date}</TD>
+                          <TD mono>{fmt(inv.amount)}</TD>
+                          <TD mono color={C.green}>{fmt(inv.paid)}</TD>
+                          <TD mono color={invReturned>0?C.purple:C.textMuted}>{invReturned>0?`- ${fmt(invReturned)}`:"—"}</TD>
+                          <TD mono color={remaining>0?C.red:C.textMuted}>{fmt(remaining)}</TD>
+                          <td style={{ padding:"11px 14px" }}><Badge label={inv.status} /></td>
+                        </TRow>
+                      );
+                    })}
                   </tbody>
                 </table>
                 </div>

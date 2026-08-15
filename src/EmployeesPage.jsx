@@ -211,10 +211,34 @@ function EmployeesPage({
     });
   };
 
+  const [showArchivedEmp, setShowArchivedEmp] = useState(false);
+
+  const empHasHistory = (empId) =>
+    salaries.some(s=>s.employeeId===empId) || attendance.some(a=>a.employeeId===empId) || advances.some(a=>a.employeeId===empId);
+
   const handleDeleteEmployee = (e) => {
+    const hasHistory = empHasHistory(e.id);
     requestPasscode({
-      pageId, kind:"delete", label:"حذف موظف",
-      onConfirm: () => { onDeleteEmployee(e.id); log({ actionType:"حذف", section:"الموظفين", target:e.name, before:e, after:null }); },
+      pageId, kind:"delete", label: hasHistory ? "أرشفة موظف له سجلات سابقة" : "حذف موظف",
+      onConfirm: () => {
+        if (hasHistory) {
+          onUpdateEmployee({ ...e, isActive:false });
+          log({ actionType:"أرشفة", section:"الموظفين", target:e.name, before:e, after:{...e,isActive:false} });
+        } else {
+          onDeleteEmployee(e.id);
+          log({ actionType:"حذف", section:"الموظفين", target:e.name, before:e, after:null });
+        }
+      },
+    });
+  };
+
+  const handleReactivateEmployee = (e) => {
+    requestPasscode({
+      pageId, kind:"edit", label:"استعادة موظف من الأرشيف",
+      onConfirm: () => {
+        onUpdateEmployee({ ...e, isActive:true });
+        log({ actionType:"استعادة من الأرشيف", section:"الموظفين", target:e.name, before:e, after:{...e,isActive:true} });
+      },
     });
   };
 
@@ -395,6 +419,8 @@ function EmployeesPage({
   };
 
   const totalSalaries = salaries.reduce((s,r)=>s+r.netSalary,0);
+  const activeEmployees = employees.filter(e=>e.isActive!==false);
+  const archivedEmployees = employees.filter(e=>e.isActive===false);
   const totalAdvances = advances.filter(a=>a.status==="قيد السداد").reduce((s,a)=>s+a.amount,0);
   const absences = attendance.filter(a=>a.type==="غياب").length;
   const leaveDays = attendance.filter(a=>a.type==="إجازة").length;
@@ -469,11 +495,19 @@ function EmployeesPage({
       {/* Employees Tab */}
       {tab==="employees" && (
         <Card style={{ padding:0 }}>
+          <div style={{ padding:"10px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ fontSize:11,fontWeight:700,color:C.textMuted }}>{showArchivedEmp?`المؤرشفون (${archivedEmployees.length})`:`الموظفون النشطون (${activeEmployees.length})`}</span>
+            {archivedEmployees.length>0 && (
+              <button onClick={()=>setShowArchivedEmp(s=>!s)} style={{ background:"none",border:"none",cursor:"pointer",color:C.accent,fontSize:11,fontWeight:700,fontFamily:"inherit" }}>
+                {showArchivedEmp?"عرض النشطين":`الأرشيف (${archivedEmployees.length})`}
+              </button>
+            )}
+          </div>
           <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
           <table style={{ width:"100%",minWidth:760,borderCollapse:"collapse" }}>
             <THead cols={["الكود","الاسم","المنصب","الراتب الأساسي","الهاتف","تاريخ التعيين","ملاحظات",""]} />
             <tbody>
-              {employees.map((e,idx)=>(
+              {(showArchivedEmp?archivedEmployees:activeEmployees).map((e,idx)=>(
                 <TRow key={e.id} alt={idx%2}>
                   <TD color={C.accent}>{e.id}</TD>
                   <TD><span style={{ fontWeight:700 }}>{e.name}</span></TD>
@@ -484,8 +518,14 @@ function EmployeesPage({
                   <TD color={C.textMuted}>{e.notes||"—"}</TD>
                   <td style={{ padding:"11px 14px" }}>
                     <div style={{ display:"flex",gap:6 }}>
-                      <button onClick={()=>openEditEmp(e)} style={{ background:"none",border:"none",cursor:"pointer",color:C.accent }}><Ic d={I.edit} s={14} /></button>
-                      <button onClick={()=>handleDeleteEmployee(e)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                      {showArchivedEmp ? (
+                        <button onClick={()=>handleReactivateEmployee(e)} style={{ background:C.greenDim,color:C.green,border:`1px solid ${C.green}33`,borderRadius:7,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>استعادة</button>
+                      ) : (
+                        <>
+                          <button onClick={()=>openEditEmp(e)} style={{ background:"none",border:"none",cursor:"pointer",color:C.accent }}><Ic d={I.edit} s={14} /></button>
+                          <button onClick={()=>handleDeleteEmployee(e)} style={{ background:"none",border:"none",cursor:"pointer",color:C.textMuted }}><Ic d={I.trash} s={14} /></button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </TRow>
@@ -493,7 +533,7 @@ function EmployeesPage({
             </tbody>
           </table>
           </div>
-          {employees.length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>لا يوجد موظفون بعد</div>}
+          {(showArchivedEmp?archivedEmployees:activeEmployees).length===0 && <div style={{ padding:40,textAlign:"center",color:C.textMuted,fontSize:13 }}>{showArchivedEmp?"لا يوجد مؤرشفون":"لا يوجد موظفون بعد"}</div>}
         </Card>
       )}
 
@@ -750,7 +790,11 @@ function EmployeesPage({
         <Modal title="💰 صرف مرتب" onClose={()=>setShowModal(false)}>
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-              <Sel label="الموظف" value={salForm.employeeId} onChange={v=>{ const e=employees.find(x=>x.id===v); setSalForm({...salForm,employeeId:v,baseSalary:e?.baseSalary||"",advancesToDeduct:[]}); }} options={employees.map(e=>({value:e.id,label:e.name}))} />
+              <Sel label="الموظف" value={salForm.employeeId} onChange={v=>{
+                const e=employees.find(x=>x.id===v);
+                const autoAdvances = advances.filter(a=>a.employeeId===v && a.status==="قيد السداد").map(a=>a.id);
+                setSalForm({...salForm,employeeId:v,baseSalary:e?.baseSalary||"",advancesToDeduct:autoAdvances});
+              }} options={activeEmployees.map(e=>({value:e.id,label:e.name}))} />
               <MonthPicker label="الشهر" value={salForm.month} onChange={v=>setSalForm({...salForm,month:v})} />
               <Inp label="الراتب الأساسي (ج.م)" type="number" value={salForm.baseSalary} onChange={v=>setSalForm({...salForm,baseSalary:v})} />
               <Inp label="أيام العمل الشهرية" type="number" value={salForm.workingDays} onChange={v=>setSalForm({...salForm,workingDays:v})} placeholder="26" />
@@ -786,7 +830,7 @@ function EmployeesPage({
             {/* السلف القائمة */}
             {pendingAdvances.length>0 && (
               <div style={{ background:C.yellowDim,border:`1px solid ${C.yellow}22`,borderRadius:11,padding:"12px 16px" }}>
-                <div style={{ fontSize:12,fontWeight:700,color:C.yellow,marginBottom:8 }}>💳 السلف القائمة — اختر ما تريد خصمه</div>
+                <div style={{ fontSize:12,fontWeight:700,color:C.yellow,marginBottom:8 }}>💳 السلف القائمة — بتتخصم تلقائيًا، شيل العلامة لو عايز تأجل سداد سلفة معينة</div>
                 {pendingAdvances.map(a=>(
                   <label key={a.id} style={{ display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${C.border}`,cursor:"pointer" }}>
                     <input type="checkbox" checked={(salForm.advancesToDeduct||[]).includes(a.id)}
@@ -830,7 +874,7 @@ function EmployeesPage({
         <Modal title="تسجيل خصم / غياب / إجازة" onClose={()=>setShowModal(false)}>
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-              <Sel label="الموظف" value={attForm.employeeId} onChange={v=>setAttForm({...attForm,employeeId:v})} options={employees.map(e=>({value:e.id,label:e.name}))} />
+              <Sel label="الموظف" value={attForm.employeeId} onChange={v=>setAttForm({...attForm,employeeId:v})} options={activeEmployees.map(e=>({value:e.id,label:e.name}))} />
               <DatePicker label="التاريخ" value={attForm.date} onChange={v=>setAttForm({...attForm,date:v})} />
               <Sel label="النوع" value={attForm.type} onChange={v=>setAttForm({...attForm,type:v})} options={[{value:"غياب",label:"🔴 غياب"},{value:"إجازة",label:"🟡 إجازة"},{value:"تأخر",label:"🟠 تأخر"},{value:"خصم آخر",label:"⚫ خصم آخر"}]} />
               <Inp label="قيمة الخصم (ج.م)" type="number" value={attForm.deductAmount} onChange={v=>setAttForm({...attForm,deductAmount:v})} placeholder="المبلغ بالجنيه" required />
@@ -851,7 +895,7 @@ function EmployeesPage({
         <Modal title="سلفة جديدة" onClose={()=>setShowModal(false)}>
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-              <Sel label="الموظف" value={advForm.employeeId} onChange={v=>setAdvForm({...advForm,employeeId:v})} options={employees.map(e=>({value:e.id,label:e.name}))} />
+              <Sel label="الموظف" value={advForm.employeeId} onChange={v=>setAdvForm({...advForm,employeeId:v})} options={activeEmployees.map(e=>({value:e.id,label:e.name}))} />
               <DatePicker label="التاريخ" value={advForm.date} onChange={v=>setAdvForm({...advForm,date:v})} />
               <Inp label="المبلغ (ج.م)" type="number" value={advForm.amount} onChange={v=>setAdvForm({...advForm,amount:v})} required />
             </div>
